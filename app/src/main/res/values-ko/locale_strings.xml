@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_language">앱 언어</string>
+    <string name="app_language_system">기기 언어 사용</string>
+    <string name="app_language_older_android">이 Android 버전에서는 기기의 언어 설정을 따릅니다.</string>
+    <string name="store_title">Debian 앱 스토어</string>
+    <string name="store_subtitle">Debian 13 · 서명된 APT 저장소 · AppStream</string>
+    <string name="store_compatibility">Wayland 데스크톱 앱용입니다. 설치되더라도 실행되지 않는 앱이 있습니다.</string>
+    <string name="store_search">앱 검색</string>
+    <string name="store_category">분류: %1$s</string>
+    <string name="store_all">전체</string>
+    <string name="store_refresh">새로고침</string>
+    <string name="store_refresh_job">저장소 새로고침</string>
+    <string name="store_loading">앱 목록을 확인하는 중…</string>
+    <string name="store_load_error">Debian 앱 목록을 읽지 못했습니다.</string>
+    <string name="store_job_running">진행 중: %1$s</string>
+    <string name="store_job_failed">실패: %1$s</string>
+    <string name="store_job_done">완료: %1$s</string>
+    <string name="store_installed_open">설치됨 · 열기</string>
+    <string name="store_open">열기</string>
+    <string name="store_more">더 보기</string>
+    <string name="store_no_results">검색 결과가 없습니다.</string>
+    <string name="store_open_confirm">Debian 패키지가 제공한 데스크톱 실행 항목을 확인합니다.</string>
+    <string name="store_install_confirm">서명된 Debian 저장소에서 %1$s 패키지와 실행에 필요한 패키지를 설치합니다.</string>
+    <string name="store_launcher_missing">%1$s: 이 패키지가 제공한 실행 항목을 열 수 없습니다.</string>
+    <string name="store_cancel">취소</string>
+</resources>

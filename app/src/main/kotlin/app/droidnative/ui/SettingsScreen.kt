@@ -97,6 +97,10 @@ fun SettingsScreen() {
         AppearanceSetting()
 
         HorizontalDivider(Modifier.padding(vertical = 8.dp))
+        SectionTitle(R.string.app_language)
+        AppLanguageSettings()
+
+        HorizontalDivider(Modifier.padding(vertical = 8.dp))
         SectionTitle(R.string.settings_display)
         DisplaySettings()
 
@@ -120,6 +124,7 @@ fun SettingsScreen() {
         Hint(R.string.settings_restart_hint)
         HorizontalDivider(Modifier.padding(vertical = 8.dp))
         SectionTitle(R.string.diagnostic_section)
+        LiveDiagnosticToggle()
         DiagnosticAction(Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
     }
 }

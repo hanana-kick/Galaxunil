@@ -1,5 +1,7 @@
 package app.droidnative.apps
 
+import app.droidnative.diagnostics.LiveDiagnostics
+import app.droidnative.diagnostics.LiveDiagnostics.Event
 import android.content.Context
 import app.droidnative.env.EnvPaths
 import app.droidnative.env.Proot
@@ -70,6 +72,7 @@ internal object AptJobs {
     @Synchronized fun start(context: Context, snapshot: DebianCatalog.Snapshot?, app: DebianCatalog.App?, title: String) {
         if (_job.value?.running == true) return
         _job.value = Job(title, true)
+        LiveDiagnostics.event(Event.CATALOG_START)
         kotlin.concurrent.thread(name = "debian-apt") {
             val result = runCatching {
                 DebianCatalog.run(context.applicationContext, snapshot, app) { line ->
@@ -77,6 +80,7 @@ internal object AptJobs {
                 }
             }
             _job.value = Job(title, false, error = result.exceptionOrNull()?.message)
+            LiveDiagnostics.event(if (result.isSuccess) Event.CATALOG_COMPLETE else Event.CATALOG_FAILED)
         }
     }
 }

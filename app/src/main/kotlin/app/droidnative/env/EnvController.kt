@@ -1,5 +1,8 @@
 package app.droidnative.env
 
+import app.droidnative.diagnostics.LiveDiagnostics
+import app.droidnative.diagnostics.LiveDiagnostics.Event
+import app.droidnative.diagnostics.DiagnosticReport
 import android.content.Context
 import android.content.Intent
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -75,6 +78,7 @@ object EnvController {
         val app = context.applicationContext
         synchronized(logLines) { logLines.clear(); _installLog.value = emptyList() }
         _status.value = Status(State.INSTALLING, "starting", Progress(0, 0))
+        LiveDiagnostics.event(Event.SETUP_START)
         Thread({
             try {
                 val paths = EnvPaths(app)
@@ -99,11 +103,18 @@ object EnvController {
                     val r = setup.run { line ->
                         if (steps.parse(line)) {
                             _status.value = Status(State.INSTALLING, steps.label, steps.progress())
-                            if (line.startsWith("[setup]")) log(line)
+                            if (line.startsWith("[setup]")) {
+                                log(line)
+                                when (line) {
+                                    "[setup] Updating signed Debian repositories" -> LiveDiagnostics.event(Event.SETUP_INDEX)
+                                    "[setup] Installing desktop runtime and AppStream reader" -> LiveDiagnostics.event(Event.SETUP_PACKAGES)
+                                }
+                            }
                         } else log(line)
                     }
                     if (!r.ok) throw IllegalStateException("package setup failed (exit ${r.exitCode})")
                 }
+                LiveDiagnostics.event(Event.SETUP_COMPLETE)
                 busy = false
                 start(app)
             } catch (e: Exception) {
@@ -111,6 +122,8 @@ object EnvController {
                 val message = e.message ?: e.javaClass.simpleName
                 log("error: $message")
                 _status.value = Status(State.ERROR, message)
+                val symptom = DiagnosticReport.classify(_installLog.value.takeLast(30).joinToString("\n"))
+                LiveDiagnostics.event(if (symptom == DiagnosticReport.Symptom.DNS) Event.SETUP_DNS_FAILED else Event.SETUP_FAILED)
             }
         }, "dn-install").start()
     }
@@ -154,12 +167,14 @@ object EnvController {
     }
 
     fun start(context: Context) {
+        LiveDiagnostics.event(Event.ENVIRONMENT_START)
         EnvService.start(context)
         // The service flips isRunning in onCreate; reflect the intent now
         _status.value = Status(State.RUNNING, "starting")
     }
 
     fun stop(context: Context) {
+        LiveDiagnostics.event(Event.ENVIRONMENT_STOP)
         context.stopService(Intent(context, EnvService::class.java))
         _status.value = Status(State.STOPPED)
     }

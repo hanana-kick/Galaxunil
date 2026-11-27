@@ -16,6 +16,35 @@ concurrency:
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
+  release-target:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.intent.outputs.tag }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Check explicit release intent
+        id: intent
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            tag="$GITHUB_REF_NAME"
+          elif [[ "$GITHUB_REF" == refs/heads/main ]]; then
+            intent=.github/galaxunil-release
+            [[ "$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA")" == "$intent" ]] || exit 0
+            [[ "$(git ls-tree "$GITHUB_SHA" "$intent" | cut -d ' ' -f 1)" == 100644 ]] || exit 1
+            [[ "$(wc -l < "$intent")" == 1 ]] || exit 1
+            IFS= read -r tag < "$intent"
+          else
+            exit 0
+          fi
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]
+          printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
+
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 35
@@ -36,11 +65,11 @@ jobs:
           printf 'ANDROID_HOME=%s\nANDROID_SDK_ROOT=%s\n' "$ANDROID_HOME" "$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
       - name: Verify and prepare runtime assets
         run: python3 tools/bootstrap_assets.py
-      - name: Test the AppStream parser
+      - name: Test AppStream and localization
         run: |
           python3 -m venv .ci-venv
           .ci-venv/bin/pip install 'PyYAML==6.0.2'
-          .ci-venv/bin/python -m unittest discover -s tests -p test_debian_catalog.py -v
+          .ci-venv/bin/python -m unittest discover -s tests -p test_*.py -v
       - name: Android unit tests and preview APK
         run: ./gradlew --no-daemon --console=plain :app:testPlayDebugUnitTest :app:assemblePlayDebug
       - name: Stage Android preview artifact
@@ -62,8 +91,8 @@ jobs:
           if-no-files-found: ignore
 
   sign-release:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    if: needs.release-target.outputs.tag != ''
+    needs: [build, release-target]
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -78,10 +107,11 @@ jobs:
       - name: Validate release ref
         shell: bash
         run: |
-          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
       - name: Build the Android release APK
         shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.release-target.outputs.tag }}
         run: |
           export ANDROID_HOME="$RUNNER_TEMP/galaxunil-android-sdk"
           export ANDROID_SDK_ROOT="$ANDROID_HOME"
@@ -89,7 +119,7 @@ jobs:
           printf 'ANDROID_HOME=%s\nANDROID_SDK_ROOT=%s\n' "$ANDROID_HOME" "$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
           python3 tools/bootstrap_assets.py
           ./gradlew --no-daemon --console=plain \
-            "-PgalaxunilVersionName=${GITHUB_REF_NAME#v}" \
+            "-PgalaxunilVersionName=${RELEASE_TAG#v}" \
             "-PgalaxunilVersionCode=$GITHUB_RUN_NUMBER" :app:assemblePlayRelease
       - name: Sign and verify the APK
         shell: bash
@@ -98,7 +128,10 @@ jobs:
           GALAXUNIL_KEY_ALIAS: ${{ secrets.GALAXUNIL_KEY_ALIAS }}
           GALAXUNIL_STORE_PASSWORD: ${{ secrets.GALAXUNIL_STORE_PASSWORD }}
           GALAXUNIL_KEY_PASSWORD: ${{ secrets.GALAXUNIL_KEY_PASSWORD }}
-        run: bash tools/sign_release.sh
+        run: |
+          bash tools/sign_release.sh
+          "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs dist-release/Galaxunil.apk |
+            grep -Fi 'certificate SHA-256 digest: bd8f0cb6bc398a318d1add20061544ae46e1b45d2e102e78e79e96e2c9f67512'
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: galaxunil-signed-release
@@ -106,8 +139,8 @@ jobs:
           if-no-files-found: error
 
   publish-release:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: sign-release
+    if: needs.release-target.outputs.tag != ''
+    needs: [sign-release, release-target]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -121,9 +154,24 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.release-target.outputs.tag }}
         run: |
           (cd dist-release && sha256sum -c SHA256SUMS)
           options=()
-          if [[ "$GITHUB_REF_NAME" == *-* ]]; then options+=(--prerelease); fi
-          gh release create "$GITHUB_REF_NAME" dist-release/Galaxunil.apk dist-release/SHA256SUMS \
-            --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes "${options[@]}"
+          if [[ "$RELEASE_TAG" == *-* ]]; then options+=(--prerelease); fi
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            options+=(--verify-tag)
+          else
+            set +e
+            remote="$(git ls-remote --exit-code "https://github.com/$GITHUB_REPOSITORY.git" "refs/tags/$RELEASE_TAG")"
+            status=$?
+            set -e
+            case "$status" in
+              0) test "$remote" = "$(printf '%s\trefs/tags/%s' "$GITHUB_SHA" "$RELEASE_TAG")" ;;
+              2) ;;
+              *) exit "$status" ;;
+            esac
+            options+=(--target "$GITHUB_SHA")
+          fi
+          gh release create "$RELEASE_TAG" dist-release/Galaxunil.apk dist-release/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" --generate-notes "${options[@]}"

@@ -1,6 +1,9 @@
 package app.droidnative
 
 import app.droidnative.ui.DiagnosticAction
+import app.droidnative.diagnostics.LiveDiagnostics
+import app.droidnative.diagnostics.LiveDiagnostics.Event
+import app.droidnative.diagnostics.DiagnosticReport
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -164,6 +167,7 @@ class LaunchActivity : ComponentActivity(), Compositor.Listener {
     }
 
     private fun start(e: DesktopEntry) {
+        LiveDiagnostics.event(Event.APP_LAUNCH)
         val apps = LinuxApps(this)
         val log = apps.logFile(e)
         if (!EnvService.isRunning) EnvController.start(this)
@@ -200,6 +204,14 @@ class LaunchActivity : ComponentActivity(), Compositor.Listener {
 
     private fun fail(message: String, log: File?) {
         val text = log?.let { readTail(it) } ?: ""
+        val event = when (DiagnosticReport.classify(text)) {
+            DiagnosticReport.Symptom.WAYLAND -> Event.APP_WAYLAND
+            DiagnosticReport.Symptom.GRAPHICS -> Event.APP_GRAPHICS
+            DiagnosticReport.Symptom.SANDBOX -> Event.APP_SANDBOX
+            DiagnosticReport.Symptom.DEPENDENCY -> Event.APP_DEPENDENCY
+            else -> Event.APP_FAILED
+        }
+        LiveDiagnostics.event(event)
         runOnUiThread { failure = Failure(message, text) }
     }
 
@@ -219,6 +231,7 @@ class LaunchActivity : ComponentActivity(), Compositor.Listener {
     override fun onToplevelNew(toplevel: Compositor.Toplevel) {
         if (done || failure != null) return
         done = true
+        LiveDiagnostics.event(Event.APP_WINDOW)
         WindowLauncher.open(this, toplevel) { finish() }
     }
 

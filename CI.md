@@ -30,3 +30,12 @@ Settings → Secrets and variables → Actions에 다음 저장소 시크릿을 
 | `GALAXUNIL_KEY_PASSWORD` | 서명 키 비밀번호 |
 
 릴리스 버전명은 태그에서, Android 버전 코드는 워크플로 실행 번호에서 가져옵니다. 시크릿이 없거나 서명 검증이 실패하면 배포하지 않습니다. 장치의 업데이트 서명을 유지하려면 같은 배포 키를 계속 사용해야 합니다.
+
+## Release from main without a release branch
+
+The ordinary `vX.Y.Z` tag path still works. If the release tool cannot write a Git tag directly,
+land and verify the intended changes on main first. An explicit main commit that changes only
+`.github/galaxunil-release` to exactly one line `vX.Y.Z` requests the same release workflow.
+The workflow checks the APK against the public v0.1.0 signer fingerprint before publishing and
+creates the missing release tag at that exact main commit. Never add or change the marker before
+approving the release; ordinary builds do not sign or publish.

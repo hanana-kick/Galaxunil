@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_language">App language</string>
+    <string name="app_language_system">System default</string>
+    <string name="app_language_ko" translatable="false">한국어</string>
+    <string name="app_language_en" translatable="false">English</string>
+    <string name="app_language_older_android">On this Android version, Galaxunil follows your device language.</string>
+    <string name="store_title">Debian app store</string>
+    <string name="store_subtitle">Debian 13 · Signed APT repositories · AppStream</string>
+    <string name="store_compatibility">For Wayland desktop apps. An app may install successfully but not run.</string>
+    <string name="store_search">Search apps</string>
+    <string name="store_category">Category: %1$s</string>
+    <string name="store_all">All</string>
+    <string name="store_refresh">Refresh</string>
+    <string name="store_refresh_job">Refresh repositories</string>
+    <string name="store_loading">Checking the app catalog…</string>
+    <string name="store_load_error">Could not read the Debian app catalog.</string>
+    <string name="store_job_running">In progress: %1$s</string>
+    <string name="store_job_failed">Failed: %1$s</string>
+    <string name="store_job_done">Complete: %1$s</string>
+    <string name="store_installed_open">Installed · Open</string>
+    <string name="store_open">Open</string>
+    <string name="store_more">Show more</string>
+    <string name="store_no_results">No matching apps.</string>
+    <string name="store_open_confirm">Check the desktop launcher provided by this Debian package.</string>
+    <string name="store_install_confirm">Install %1$s and its dependencies from the signed Debian repository.</string>
+    <string name="store_launcher_missing">%1$s: the package did not provide a desktop launcher that can be opened.</string>
+    <string name="store_cancel">Cancel</string>
+</resources>

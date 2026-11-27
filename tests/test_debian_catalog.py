@@ -44,3 +44,20 @@ Name: {C: Blocked}
     def test_untrusted_constructor_is_never_loaded(self):
         with self.assertRaises(yaml.YAMLError):
             self.read("!!python/object:__main__.NoExecution {}")
+
+class BootstrapTLSConfigTest(unittest.TestCase):
+    def test_bootstrap_apt_uses_existing_bundle_without_relaxing_tls(self):
+        config = source.with_name("60-droidnative-appstream").read_text()
+        live = [line.strip() for line in config.splitlines()
+                if line.strip() and not line.lstrip().startswith("//")]
+        self.assertEqual([line for line in live if "cainfo" in line.lower()], [
+            'Acquire::https::deb.debian.org::CaInfo "/etc/ssl/certs/ca-certificates.crt";',
+        ])
+        for option in ("Verify-Peer", "Verify-Host"):
+            self.assertEqual([line for line in live if option in line], [
+                f'Acquire::https::{option} "true";',
+            ])
+        for option in ("AllowInsecureRepositories", "AllowWeakRepositories",
+                       "AllowDowngradeToInsecureRepositories"):
+            self.assertIn(f'Acquire::{option} "false";', live)
+        self.assertIn('Acquire::Check-Valid-Until "true";', live)

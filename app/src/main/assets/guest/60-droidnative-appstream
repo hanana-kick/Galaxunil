@@ -4,6 +4,9 @@ Acquire::AllowDowngradeToInsecureRepositories "false";
 Acquire::Check-Valid-Until "true";
 Acquire::https::Verify-Peer "true";
 Acquire::https::Verify-Host "true";
+// Debian slim does not ship OpenSSL's default CA links before the first update.
+// GuestSetup stages the verified Debian CA bundle at its conventional path.
+Acquire::https::deb.debian.org::CaInfo "/etc/ssl/certs/ca-certificates.crt";
 Acquire::IndexTargets::deb::DEP-11 {
     MetaKey "$(COMPONENT)/dep11/Components-$(NATIVE_ARCHITECTURE).yml";
     ShortDescription "AppStream";

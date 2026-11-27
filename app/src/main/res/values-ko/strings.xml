@@ -7,7 +7,6 @@
     <string name="window_opened_text">눌러서 창을 표시합니다.</string>
     <string name="window_unnamed">Linux 앱</string>
     <string name="env_running">Linux 환경 실행 중</string>
-    <string name="fgs_special_use">Linux 환경과 서비스를 계속 실행합니다</string>
     <string name="tab_overview">개요</string>
     <string name="tab_install">설치</string>
     <string name="tab_settings">설정</string>

@@ -7,7 +7,7 @@
     <string name="window_opened_text">Tap to show it.</string>
     <string name="window_unnamed">A Linux app</string>
     <string name="env_running">Linux environment is running</string>
-    <string name="fgs_special_use">Keeps the Linux environment and its services running</string>
+    <string name="fgs_special_use" translatable="false">Keeps the Linux environment and its services running</string>
 
     <!-- Tabs -->
     <string name="tab_overview">Overview</string>

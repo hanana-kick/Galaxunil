@@ -36,3 +36,15 @@ class LocalizationTest(unittest.TestCase):
         self.assertEqual({e.attrib[ANDROID + "name"] for e in config.findall("locale")}, {"en", "ko"})
         manifest = ET.parse(RES.parent / "AndroidManifest.xml").getroot()
         self.assertEqual(manifest.find("application").attrib[ANDROID + "localeConfig"], "@xml/locales_config")
+
+    def test_service_manifest_metadata_is_not_localized(self):
+        manifest = ET.parse(RES.parent / "AndroidManifest.xml").getroot()
+        base = collect_strings(RES / "values")
+        translated = collect_strings(RES / "values-ko")
+        for prop in manifest.findall(".//service/property"):
+            if prop.get(ANDROID + "name") == "android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE":
+                value = prop.get(ANDROID + "value")
+                self.assertTrue(value.startswith("@string/"))
+                key = value.removeprefix("@string/")
+                self.assertEqual(base[key].get("translatable"), "false")
+                self.assertNotIn(key, translated)

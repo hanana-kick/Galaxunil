@@ -1,6 +1,8 @@
 package app.droidnative.diagnostics
 
 import android.os.SystemClock
+import android.util.Base64
+import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -18,7 +20,7 @@ import java.io.IOException
 import java.net.URL
 import javax.net.ssl.HttpsURLConnection
 
-/** Opt-in, in-memory session. Only fixed application events leave this process. */
+/** Opt-in, in-memory session for events and app-scoped diagnostics. */
 internal object LiveDiagnostics {
     enum class Event(val wire: String) {
         START("session-start"), HEARTBEAT("heartbeat"),
@@ -31,10 +33,15 @@ internal object LiveDiagnostics {
         APP_DEPENDENCY("app-dependency"),
     }
     enum class State { OFF, CONNECTING, LIVE, REJECTED, UNREACHABLE }
-    private class Session(var pendingPin: String?, val deadline: Long) {
+    enum class LogState { OFF, SENDING, LIMIT, FAILED }
+    private val _logState = MutableStateFlow(LogState.OFF)
+    val logState = _logState.asStateFlow()
+    private class Session(var pendingPin: String?, val deadline: Long, val logDir: File) {
         val queue = Channel<Event>(capacity = 24)
         var job: Job? = null
-        var connection: HttpsURLConnection? = null
+        val connections = mutableSetOf<HttpsURLConnection>()
+        var logcat: java.lang.Process? = null
+        val logJobs = mutableListOf<Job>()
     }
     private const val SESSION_MS = 15 * 60 * 1000L
     // Fixed service origin only; never obtained from entered data.
@@ -47,11 +54,11 @@ internal object LiveDiagnostics {
     private var current: Session? = null
     fun accepts(value: String) = pinPattern.matches(value.trim())
 
-    @Synchronized fun start(input: String) {
+    @Synchronized fun start(input: String, logDir: File) {
         val pin = input.trim()
         require(accepts(pin))
         finishLocked(State.OFF)
-        val session = Session(pin, SystemClock.elapsedRealtime() + SESSION_MS)
+        val session = Session(pin, SystemClock.elapsedRealtime() + SESSION_MS, logDir)
         current = session
         _state.value = State.CONNECTING
         session.job = scope.launch { run(session) }
@@ -69,7 +76,10 @@ internal object LiveDiagnostics {
         session?.pendingPin = null
         session?.queue?.close()
         session?.job?.cancel()
-        session?.connection?.let { conn -> scope.launch { conn.disconnect() } }
+        session?.logJobs?.forEach { it.cancel() }
+        session?.logcat?.destroy()
+        session?.connections?.toList()?.forEach { conn -> scope.launch { conn.disconnect() } }
+        _logState.value = LogState.OFF
         _state.value = state
     }
 
@@ -96,7 +106,12 @@ internal object LiveDiagnostics {
                     delay(1000L shl i)
                 }
                 when (status) {
-                    204 -> synchronized(this) { if (current === session) _state.value = State.LIVE }
+                    204 -> synchronized(this) {
+                        if (current === session) {
+                            _state.value = State.LIVE
+                            if (seq == 1) sendLogs(session, token)
+                        }
+                    }
                     in 400..499 -> { outcome = State.REJECTED; break }
                     else -> { outcome = State.UNREACHABLE; break }
                 }
@@ -110,6 +125,52 @@ internal object LiveDiagnostics {
         } finally {
             synchronized(this) { if (current === session) finishLocked(outcome) }
         }
+    }
+
+    private fun sendLogs(session: Session, token: String) {
+        val queue = Channel<DebugLogCapture.Chunk>(capacity = 64)
+        _logState.value = LogState.SENDING
+        val files = scope.launch { DebugLogCapture.files(session.logDir, queue) }
+        val cat = scope.launch {
+            DebugLogCapture.android(queue) { process ->
+                synchronized(this@LiveDiagnostics) {
+                    if (current !== session) false
+                    else { session.logcat = process; true }
+                }
+            }
+        }
+        val uploader = scope.launch {
+            var seq = 1
+            var finalState = LogState.FAILED
+            try {
+                for (chunk in queue) {
+                    if (SystemClock.elapsedRealtime() >= session.deadline) break
+                    val data = Base64.encodeToString(chunk.bytes, Base64.NO_WRAP)
+                    val body = """{"seq":$seq,"source":"${chunk.source}","data":"$data"}"""
+                    var status = 0
+                    for (attempt in 0..2) {
+                        status = try { request(session, "/v1/logs", body, token).status }
+                                 catch (_: IOException) { 0 }
+                        if (status == 204 || status in 400..499) break
+                        delay(500L shl attempt)
+                    }
+                    if (status != 204) {
+                        if (status == 413) finalState = LogState.LIMIT
+                        break
+                    }
+                    seq++
+                }
+            } finally {
+                files.cancel()
+                cat.cancel()
+                synchronized(this@LiveDiagnostics) {
+                    session.logcat?.destroy()
+                    if (current === session) _logState.value = finalState
+                }
+                queue.cancel()
+            }
+        }
+        session.logJobs.addAll(listOf(files, cat, uploader))
     }
 
     private data class Response(val status: Int, val body: String = "")
@@ -131,7 +192,7 @@ internal object LiveDiagnostics {
         conn.setFixedLengthStreamingMode(body.size)
         synchronized(this) {
             if (current !== session) { conn.disconnect(); return Response(-1) }
-            session.connection = conn
+            session.connections.add(conn)
         }
         try {
             conn.outputStream.use { it.write(body) }
@@ -150,7 +211,7 @@ internal object LiveDiagnostics {
             }
         } finally {
             conn.disconnect()
-            synchronized(this) { if (session.connection === conn) session.connection = null }
+            synchronized(this) { session.connections.remove(conn) }
         }
     }
 }

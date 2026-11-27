@@ -4,6 +4,7 @@ import app.droidnative.diagnostics.LiveDiagnostics
 import app.droidnative.diagnostics.LiveDiagnostics.Event
 import app.droidnative.diagnostics.DiagnosticReport
 import android.content.Context
+import android.util.Log
 import android.content.Intent
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -121,6 +122,7 @@ object EnvController {
                 busy = false
                 val message = e.message ?: e.javaClass.simpleName
                 log("error: $message")
+                Log.e("galaxunil-setup", "Guest setup failed", e)
                 _status.value = Status(State.ERROR, message)
                 val symptom = DiagnosticReport.classify(_installLog.value.takeLast(30).joinToString("\n"))
                 LiveDiagnostics.event(if (symptom == DiagnosticReport.Symptom.DNS) Event.SETUP_DNS_FAILED else Event.SETUP_FAILED)

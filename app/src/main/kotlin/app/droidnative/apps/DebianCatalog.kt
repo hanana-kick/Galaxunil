@@ -58,8 +58,18 @@ internal object DebianCatalog {
             require(snapshot?.apps?.contains(target) == true && packageName.matches(target.pkg))
             listOf("/usr/bin/apt-get", "-y", "--no-install-recommends", "install", "--", target.pkg)
         }
-        val res = Proot(EnvPaths(context)).run(args, extraEnv = mapOf("DEBIAN_FRONTEND" to "noninteractive"),
-            root = true, timeoutMs = 900_000, onLine = onLine)
+        val paths = EnvPaths(context)
+        paths.logDir.mkdirs()
+        val log = java.io.File(paths.logDir, "catalog-apt.log")
+        val res = log.bufferedWriter().use { writer ->
+            Proot(paths).run(args, extraEnv = mapOf("DEBIAN_FRONTEND" to "noninteractive"),
+                root = true, timeoutMs = 900_000, onLine = { line ->
+                    writer.write(line)
+                    writer.newLine()
+                    writer.flush()
+                    onLine(line)
+                })
+        }
         check(res.ok) { res.output.takeLast(1800) }
         LinuxApps.invalidate()
     }

@@ -20,6 +20,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.LocalContext
+import java.io.File
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
@@ -31,6 +33,8 @@ import app.droidnative.diagnostics.LiveDiagnostics
 @Composable
 internal fun LiveDiagnosticToggle(modifier: Modifier = Modifier) {
     val state by LiveDiagnostics.state.collectAsStateWithLifecycle()
+    val logState by LiveDiagnostics.logState.collectAsStateWithLifecycle()
+    val filesDir = LocalContext.current.applicationContext.filesDir
     val active = state == LiveDiagnostics.State.CONNECTING || state == LiveDiagnostics.State.LIVE
     var pairing by remember { mutableStateOf(false) }
     val title = stringResource(R.string.live_diagnostic_title)
@@ -47,6 +51,13 @@ internal fun LiveDiagnosticToggle(modifier: Modifier = Modifier) {
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.titleSmall)
             Text(stringResource(detail), style = MaterialTheme.typography.bodySmall)
+            val logDetail = when (logState) {
+                LiveDiagnostics.LogState.LIMIT -> R.string.live_logs_limit
+                LiveDiagnostics.LogState.FAILED -> R.string.live_logs_failed
+                else -> null
+            }
+            if (logDetail != null) Text(stringResource(logDetail), color = MaterialTheme.colorScheme.error)
+
         }
         Switch(checked = active, onCheckedChange = { enabled ->
             if (enabled) pairing = true else LiveDiagnostics.stop()
@@ -67,7 +78,7 @@ internal fun LiveDiagnosticToggle(modifier: Modifier = Modifier) {
                 }
             },
             confirmButton = {
-                TextButton(onClick = { LiveDiagnostics.start(code); pairing = false },
+                TextButton(onClick = { LiveDiagnostics.start(code, File(filesDir, "logs")); pairing = false },
                     enabled = LiveDiagnostics.accepts(code)) { Text(stringResource(R.string.live_diagnostic_connect)) }
             },
             dismissButton = {

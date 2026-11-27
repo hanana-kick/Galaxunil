@@ -2,11 +2,13 @@
 <resources>
     <string name="live_diagnostic_title">Live diagnostics</string>
     <string name="live_diagnostic_hint">Off. Enable temporarily to send Galaxunil events to your private dashboard.</string>
-    <string name="live_diagnostic_pair_hint">Enter the 4-digit code from the private dashboard within 2 minutes. Only Galaxunil event types are sent while the switch is on. No raw logs, URLs, paths, screenshots or device identifiers are sent. No messages are sent after the session ends.</string>
+    <string name="live_diagnostic_pair_hint">Enter the 4-digit code within 2 minutes. Stored and new Galaxunil logs will be sent to your private dashboard for up to 15 minutes. Logs may contain addresses, file paths, and guest app output. Other Android apps, screenshots, and microphone or camera data are not collected.</string>
     <string name="live_diagnostic_code">4-digit connection code</string>
     <string name="live_diagnostic_connect">Start sending</string>
     <string name="live_diagnostic_connecting">Connecting…</string>
-    <string name="live_diagnostic_active">Sending Galaxunil events. Turn this off to stop.</string>
+    <string name="live_diagnostic_active">Sending Galaxunil events and logs. Turn this off to stop.</string>
     <string name="live_diagnostic_rejected">Stopped. The code expired or was rejected. Issue a new code.</string>
     <string name="live_diagnostic_unreachable">Stopped. Could not reach the diagnostic server.</string>
+    <string name="live_logs_limit">Session log limit reached (up to 16 MiB). New logs are no longer being sent.</string>
+    <string name="live_logs_failed">Log upload stopped. Events may still arrive.</string>
 </resources>

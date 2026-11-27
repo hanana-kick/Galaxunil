@@ -25,5 +25,11 @@
     <string name="store_open_confirm">Check the desktop launcher provided by this Debian package.</string>
     <string name="store_install_confirm">Install %1$s and its dependencies from the signed Debian repository.</string>
     <string name="store_launcher_missing">%1$s: the package did not provide a desktop launcher that can be opened.</string>
+    <string name="store_remove">Remove</string>
+    <string name="store_remove_title">Remove %1$s</string>
+    <string name="store_remove_confirm">Only the Debian package %1$s will be removed. This does not purge package configuration or reset the Linux environment.</string>
+    <string name="store_remove_checking">Checking which packages would be removed…</string>
+    <string name="store_remove_blocked">Removing this app would also remove other packages. No changes will be made. Affected packages:</string>
+    <string name="store_remove_unavailable">This package is protected or the effect of removing it could not be verified. No changes will be made.</string>
     <string name="store_cancel">Cancel</string>
 </resources>

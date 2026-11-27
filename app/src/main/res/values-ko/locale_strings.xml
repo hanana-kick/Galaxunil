@@ -23,5 +23,11 @@
     <string name="store_open_confirm">Debian 패키지가 제공한 데스크톱 실행 항목을 확인합니다.</string>
     <string name="store_install_confirm">서명된 Debian 저장소에서 %1$s 패키지와 실행에 필요한 패키지를 설치합니다.</string>
     <string name="store_launcher_missing">%1$s: 이 패키지가 제공한 실행 항목을 열 수 없습니다.</string>
+    <string name="store_remove">삭제</string>
+    <string name="store_remove_title">%1$s 삭제</string>
+    <string name="store_remove_confirm">Debian 패키지 %1$s만 삭제합니다. 패키지 설정을 초기화하거나 사용자 폴더와 리눅스 환경을 지우지 않습니다.</string>
+    <string name="store_remove_checking">함께 삭제될 패키지가 있는지 확인 중…</string>
+    <string name="store_remove_blocked">이 앱을 삭제하면 다른 패키지도 함께 삭제되므로 진행하지 않습니다. 영향을 받는 패키지:</string>
+    <string name="store_remove_unavailable">보호된 패키지이거나 삭제 영향을 확인할 수 없어 진행하지 않습니다.</string>
     <string name="store_cancel">취소</string>
 </resources>

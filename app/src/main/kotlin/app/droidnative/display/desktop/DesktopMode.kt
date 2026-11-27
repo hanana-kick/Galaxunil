@@ -26,6 +26,22 @@ object DesktopMode {
 
     fun enabled(context: Context) = Prefs(context).desktopEmulation
 
+    /** Software desktop is a fallback, never an overlay on native desktop windowing. */
+    fun shouldEmulate(context: Context, nativeDesktop: Boolean = WindowLauncher.desktopMode) =
+        enabled(context) && !nativeDesktop
+
+    /** The software desktop itself entered DeX/freeform while displaying windows. */
+    fun leaveEmulation(source: android.app.Activity) {
+        val desktop = DesktopState.host?.takeIf { !it.isFinishing } ?: return
+        if (DesktopState.handingOver) return
+        DesktopState.handingOver = true
+        // Start from the visible activity on the correct Android display before
+        // the emulated task closes. Compositor.attach owns the surface handover.
+        WindowLauncher.handoverFromDesktop(source)
+        EnvService.compositor.desktopEmulationChanged(false)
+        if (EnvService.isRunning) EnvService.updateNotification(desktop)
+    }
+
     /** Main thread. */
     fun set(context: Context, on: Boolean) {
         val app = context.applicationContext
@@ -34,10 +50,12 @@ object DesktopMode {
         prefs.desktopEmulation = on
         val c = EnvService.compositor
         // The desktop draws the title bars
-        c.serverDecorations = on || WindowLauncher.desktopMode
+        val emulated = shouldEmulate(app)
+        c.serverDecorations = emulated || WindowLauncher.desktopMode
         if (EnvService.isRunning) EnvService.updateNotification(app)
-        c.desktopEmulationChanged(on)
-        if (on) {
+        if (WindowLauncher.desktopMode) return
+        c.desktopEmulationChanged(emulated)
+        if (emulated) {
             if (c.toplevels.isNotEmpty()) open(context)
         } else {
             // The desktop has finished (its listener); reopen its windows
@@ -92,6 +110,7 @@ object DesktopState {
 
     /** The desktop while it exists (main thread). */
     var host: DesktopActivity? = null
+    var handingOver = false
 
     fun window(id: Int): Window = windows.getOrPut(id) { Window(id) }
 

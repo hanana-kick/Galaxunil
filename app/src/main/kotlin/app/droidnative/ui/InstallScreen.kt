@@ -2,12 +2,19 @@ package app.droidnative.ui
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -47,6 +54,9 @@ fun InstallScreen() {
     var launchError by remember { mutableStateOf<String?>(null) }
     var runningEntry by remember { mutableStateOf(false) }
     var detail by remember { mutableStateOf<DebianCatalog.App?>(null) }
+    var removal by remember { mutableStateOf<DebianCatalog.App?>(null) }
+    var removalPlan by remember { mutableStateOf<AptRemoval.Plan?>(null) }
+    var removalFailure by remember { mutableStateOf(false) }
     var category by remember { mutableStateOf("All") }
     var change by remember { mutableIntStateOf(0) }
     var limit by remember { mutableIntStateOf(30) }
@@ -60,6 +70,17 @@ fun InstallScreen() {
         try { snapshot = withContext(Dispatchers.IO) { DebianCatalog.snapshot(context) } }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { snapshot = null; error = e.message?.takeLast(800) ?: fallbackError }
+    }
+    LaunchedEffect(removal, snapshot, busy) {
+        removalPlan = null
+        removalFailure = false
+        val target = removal ?: return@LaunchedEffect
+        val current = snapshot ?: return@LaunchedEffect
+        if (busy) return@LaunchedEffect
+        try {
+            removalPlan = withContext(Dispatchers.IO) { DebianCatalog.removalPlan(context, current, target) }
+        } catch (e: CancellationException) { throw e }
+        catch (_: Exception) { removalFailure = true }
     }
     val rows = remember(snapshot, term, category) {
         val query = term.trim().lowercase(Locale.ROOT)
@@ -109,11 +130,25 @@ fun InstallScreen() {
             val installed = snapshot?.installed?.contains(app.pkg) == true
             ElevatedCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp)) {
-                    Text(app.name, style = MaterialTheme.typography.titleMedium)
-                    Text(app.summary)
-                    Text(app.pkg, style = MaterialTheme.typography.bodySmall)
-                    Button({ launchError = null; detail = app }, enabled = !busy && !runningEntry) {
-                        Text(stringResource(if (installed) R.string.store_installed_open else R.string.action_install))
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        StoreAppIcon(app)
+                        Column {
+                            Text(app.name, style = MaterialTheme.typography.titleMedium)
+                            Text(app.summary)
+                            Text(app.pkg, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button({ launchError = null; detail = app }, enabled = !busy && !runningEntry) {
+                            Text(stringResource(if (installed) R.string.store_installed_open else R.string.action_install))
+                        }
+                        if (installed && AptRemoval.eligible(app.pkg)) {
+                            TextButton({
+                                removalPlan = null
+                                removalFailure = false
+                                removal = app
+                            }, enabled = !busy && !runningEntry) { Text(stringResource(R.string.store_remove)) }
+                        }
                     }
                 }
             }
@@ -126,8 +161,40 @@ fun InstallScreen() {
         val installed = current?.installed?.contains(app.pkg) == true
         AlertDialog(onDismissRequest = { detail = null }, title = { Text(app.name) },
             text = {
-                Text(if (installed) stringResource(R.string.store_open_confirm)
-                     else stringResource(R.string.store_install_confirm, app.pkg))
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(if (installed) stringResource(R.string.store_open_confirm)
+                         else stringResource(R.string.store_install_confirm, app.pkg))
+                    if (installed && current != null && Shortcuts.isSupported(activity)) {
+                        TextButton({
+                            runningEntry = true
+                            scope.launch {
+                                try {
+                                    val launch = withContext(Dispatchers.IO) {
+                                        DebianCatalog.entry(context, current, app)?.let { entry ->
+                                            entry to (LinuxApps(context).icon(entry) ?: DebianCatalog.icon(context, app))
+                                        }
+                                    }
+                                    if (launch == null) {
+                                        launchError = activity.getString(R.string.store_launcher_missing, app.name)
+                                    } else {
+                                        val (entry, bitmap) = launch
+                                        val ok = Shortcuts.pin(activity, entry, bitmap)
+                                        Toast.makeText(context,
+                                            if (ok) activity.getString(R.string.app_add_home_requested, entry.name)
+                                            else activity.getString(R.string.app_add_home_unsupported),
+                                            Toast.LENGTH_SHORT).show()
+                                    }
+                                    detail = null
+                                } catch (e: CancellationException) { throw e }
+                                catch (e: Exception) {
+                                    launchError = e.message?.takeLast(800)
+                                    detail = null
+                                }
+                                finally { runningEntry = false }
+                            }
+                        }, enabled = !busy && !runningEntry) { Text(stringResource(R.string.app_add_home)) }
+                    }
+                }
             },
             confirmButton = {
                 TextButton({
@@ -148,8 +215,53 @@ fun InstallScreen() {
                             finally { runningEntry = false }
                         }
                     }
-                }, enabled = current != null && !busy) { Text(stringResource(if (installed) R.string.store_open else R.string.action_install)) }
+                }, enabled = current != null && !busy && !runningEntry) { Text(stringResource(if (installed) R.string.store_open else R.string.action_install)) }
             },
             dismissButton = { TextButton({ detail = null }) { Text(stringResource(R.string.store_cancel)) } })
     }
+    removal?.let { app ->
+        val plan = removalPlan?.takeIf { it.target == app.pkg }
+        val current = snapshot
+        AlertDialog(
+            onDismissRequest = { removal = null },
+            title = { Text(stringResource(R.string.store_remove_title, app.name)) },
+            text = {
+                Column(Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    when {
+                        removalFailure -> Text(stringResource(R.string.store_remove_unavailable))
+                        plan == null -> Text(stringResource(R.string.store_remove_checking))
+                        plan.allowed -> Text(stringResource(R.string.store_remove_confirm, app.pkg))
+                        else -> {
+                            Text(stringResource(R.string.store_remove_blocked))
+                            plan.removals.forEach { Text(it) }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                if (plan?.allowed == true && current != null) {
+                    TextButton({
+                        removal = null
+                        AptJobs.remove(context, current, app, plan,
+                            activity.getString(R.string.store_remove_title, app.name))
+                    }, enabled = !busy && app.pkg in current.installed) {
+                        Text(stringResource(R.string.store_remove), color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            dismissButton = { TextButton({ removal = null }) { Text(stringResource(R.string.store_cancel)) } })
+    }
+
+}
+
+@Composable
+private fun StoreAppIcon(app: DebianCatalog.App) {
+    val context = LocalContext.current.applicationContext
+    val bitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, app.icon) {
+        value = withContext(Dispatchers.IO) { DebianCatalog.icon(context, app)?.asImageBitmap() }
+    }
+    val image = bitmap
+    if (image != null) Image(image, contentDescription = null, modifier = Modifier.size(44.dp))
+    else Icon(painterResource(R.drawable.ic_penguin), null, modifier = Modifier.size(44.dp).padding(8.dp))
 }

@@ -39,8 +39,14 @@
         android:label="@string/app_name"
         android:localeConfig="@xml/locales_config"
         android:requestLegacyExternalStorage="true"
+        android:resizeableActivity="true"
         android:theme="@android:style/Theme.DeviceDefault"
         tools:targetApi="37">
+
+        <!-- Nonzero initial window size, including DeX builds without a
+             public way to query the desktop windowing state. -->
+        <meta-data android:name="com.samsung.android.dex.launchwidth" android:value="800" />
+        <meta-data android:name="com.samsung.android.dex.launchheight" android:value="600" />
 
         <activity
             android:name=".MainActivity"
@@ -78,8 +84,11 @@
             android:documentLaunchMode="intoExisting"
             android:exported="false"
             android:resizeableActivity="true"
+            android:taskAffinity="${applicationId}.linuxWindow"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
-            android:windowSoftInputMode="adjustResize|stateAlwaysHidden" />
+            android:windowSoftInputMode="adjustResize|stateAlwaysHidden">
+            <layout android:defaultWidth="800dp" android:defaultHeight="600dp" />
+        </activity>
 
         <!-- Desktop emulation: all Linux windows in one task (display/desktop) -->
         <activity

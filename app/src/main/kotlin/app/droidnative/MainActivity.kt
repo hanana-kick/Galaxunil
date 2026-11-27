@@ -35,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import app.droidnative.display.WindowLauncher
 import app.droidnative.ui.ButtonsScreen
 import app.droidnative.ui.DroidNativeTheme
 import app.droidnative.ui.InstallScreen
@@ -63,6 +64,21 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        WindowLauncher.noteWindow(this)
+    }
+
+    override fun onStop() {
+        WindowLauncher.forgetWindow(this)
+        super.onStop()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) WindowLauncher.noteWindow(this)
     }
 
     /**

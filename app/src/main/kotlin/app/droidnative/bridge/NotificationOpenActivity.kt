@@ -13,7 +13,6 @@ import app.droidnative.LaunchActivity
 import app.droidnative.apps.LinuxApps
 import app.droidnative.apps.WindowSettings
 import app.droidnative.display.Compositor
-import app.droidnative.display.WindowActivity
 import app.droidnative.display.WindowLauncher
 import app.droidnative.env.EnvService
 
@@ -48,7 +47,11 @@ class NotificationOpenActivity : Activity(), Compositor.Listener {
             it.pid == pid || (desktop.isNotEmpty() && WindowSettings.resolveApp(this, it.pid) == desktop)
         }
         when {
-            window != null -> startActivity(WindowActivity.intent(this, window.id))
+            window != null -> {
+                WindowLauncher.noteWindow(this)
+                WindowLauncher.open(this, window, reopen = true) { finish() }
+                return
+            }
             hasDefault -> {
                 waiting = true
                 EnvService.compositor.addListener(this)
@@ -65,6 +68,16 @@ class NotificationOpenActivity : Activity(), Compositor.Listener {
             if (!waiting || isFinishing) return@post
             WindowLauncher.open(this, toplevel) { finish() }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        WindowLauncher.noteWindow(this)
+    }
+
+    override fun onStop() {
+        WindowLauncher.forgetWindow(this)
+        super.onStop()
     }
 
     override fun onDestroy() {

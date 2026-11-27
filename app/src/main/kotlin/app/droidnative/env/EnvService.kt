@@ -59,7 +59,7 @@ class EnvService : Service() {
         }
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or
             (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0)
-        val target = if (DesktopMode.enabled(this)) DesktopMode.intent(this) else WindowActivity.intent(this, tl.id)
+        val target = if (DesktopMode.shouldEmulate(this)) DesktopMode.intent(this) else WindowActivity.intent(this, tl.id)
         val open = PendingIntent.getActivity(this, tl.id, target, flags)
         val name = tl.title.ifEmpty { tl.appId.ifEmpty { getString(R.string.window_unnamed) } }
         val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, WINDOW_CHANNEL)
@@ -80,7 +80,7 @@ class EnvService : Service() {
         isRunning = true
         startInForeground()
         // The desktop draws title bars; GTK reads this when it creates a window
-        compositor.serverDecorations = DesktopMode.enabled(this)
+        compositor.serverDecorations = WindowLauncher.desktopMode || DesktopMode.shouldEmulate(this)
         compositor.addListener(autoOpen)
         // Before the session, whose dn-notifyd connects to it
         Bridge.start(this)
@@ -149,7 +149,7 @@ class EnvService : Service() {
             val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(context, CHANNEL)
                           else @Suppress("DEPRECATION") Notification.Builder(context)
             builder.setSmallIcon(R.drawable.ic_penguin).setOngoing(true)
-            if (DesktopMode.enabled(context)) {
+            if (DesktopMode.shouldEmulate(context)) {
                 val flags = PendingIntent.FLAG_UPDATE_CURRENT or
                     (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0)
                 builder.setContentTitle(context.getString(R.string.desktop_env_running))

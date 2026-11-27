@@ -61,3 +61,32 @@ class BootstrapTLSConfigTest(unittest.TestCase):
                        "AllowDowngradeToInsecureRepositories"):
             self.assertIn(f'Acquire::{option} "false";', live)
         self.assertIn('Acquire::Check-Valid-Until "true";', live)
+
+class CatalogIconsTest(unittest.TestCase):
+    def test_only_safe_cached_64px_metadata(self):
+        self.assertEqual(catalog.cached_icon({"Icon": {"cached": [
+            {"name": "../../outside.png", "width": 64, "height": 64},
+            {"name": "thumble.png", "width": 48, "height": 48},
+            {"name": "good.png", "width": 64, "height": 64},
+        ]}}), "good.png")
+
+    def test_archive_copies_only_matching_regular_64px_png(self):
+        import io
+        import tarfile
+        import struct
+        png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR" + struct.pack(">II",64,64)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            index = root / "icons.tar"
+            with tarfile.open(index, "w") as tf:
+                for n,b in [("good.png",png),("extra.png",png),("../evil.png",png),
+                            ("broken.png",png[:16] + struct.pack(">II",1200,32))]:
+                    m=tarfile.TarInfo(n); m.size=len(b); tf.addfile(m,io.BytesIO(b))
+                m=tarfile.TarInfo("bad-link.png");m.type=tarfile.SYMTYPE;m.linkname="/etc/passwd";tf.addfile(m)
+            target=root/"cache"
+            catalog.sync_icons(index,target,{"good.png","../evil.png","bad-link.png","broken.png"})
+            self.assertEqual({x.name for x in target.iterdir()},{".stamp","good.png"})
+            self.assertEqual((target/"good.png").read_bytes(),png)
+            old=(target/"good.png").stat().st_mtime_ns
+            catalog.sync_icons(index,target,{"good.png"})
+            self.assertEqual((target/"good.png").stat().st_mtime_ns,old)

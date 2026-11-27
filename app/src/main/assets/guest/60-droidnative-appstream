@@ -15,3 +15,13 @@ Acquire::IndexTargets::deb::DEP-11 {
     Optional "true";
 };
 Acquire::GzipIndexes "false";
+
+// Cache the signed Debian AppStream icon index alongside package metadata.
+Acquire::IndexTargets::deb::DEP-11-icons-64 {
+    MetaKey "$(COMPONENT)/dep11/icons-64x64.tar";
+    ShortDescription "AppStream icons";
+    Description "$(RELEASE)/$(COMPONENT) AppStream icons (64x64)";
+    KeepCompressed "false";
+    Optional "true";
+    DefaultEnabled "true";
+};

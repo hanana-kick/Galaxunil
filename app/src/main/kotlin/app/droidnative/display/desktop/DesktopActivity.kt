@@ -32,6 +32,7 @@ import app.droidnative.apps.LinuxApps
 import app.droidnative.apps.Shortcuts
 import app.droidnative.apps.WindowSettings
 import app.droidnative.display.Compositor
+import app.droidnative.display.WindowLauncher
 import app.droidnative.env.EnvService
 import kotlin.math.roundToInt
 
@@ -69,7 +70,7 @@ class DesktopActivity : Activity(), Compositor.Listener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (!DesktopMode.enabled(this)) {
+        if (!DesktopMode.shouldEmulate(this, WindowLauncher.isDesktopWindow(this))) {
             finish()
             return
         }
@@ -81,6 +82,7 @@ class DesktopActivity : Activity(), Compositor.Listener {
         drawBehindSystemBars()
         buildViews()
         DesktopState.host = this
+        DesktopState.handingOver = false
         compositor.addListener(this)
         compositor.serverDecorations = true
         loadApps()
@@ -96,12 +98,27 @@ class DesktopActivity : Activity(), Compositor.Listener {
         reloadWallpaper()
     }
 
+    override fun onStart() {
+        super.onStart()
+        WindowLauncher.noteWindow(this)
+    }
+
+    override fun onStop() {
+        WindowLauncher.forgetWindow(this)
+        super.onStop()
+    }
+
+    override fun onMultiWindowModeChanged(inMultiWindow: Boolean, config: android.content.res.Configuration) {
+        super.onMultiWindowModeChanged(inMultiWindow, config)
+        if (hasWindowFocus()) WindowLauncher.noteWindow(this)
+    }
+
     override fun onDestroy() {
         if (DesktopState.host === this) DesktopState.host = null
         compositor.removeListener(this)
         menu?.dismiss()
         // The programs keep running; their surfaces detach with the views
-        for (id in windows.keys) compositor.hosted.remove(id)
+        for (id in windows.keys) if (!WindowLauncher.hasNativeHost(id)) compositor.hosted.remove(id)
         super.onDestroy()
     }
 
@@ -653,6 +670,7 @@ class DesktopActivity : Activity(), Compositor.Listener {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         this.hasFocus = hasFocus
+        if (hasFocus) WindowLauncher.noteWindow(this)
         val id = DesktopState.focused
         if (id == 0) return
         compositor.focus(id, hasFocus)

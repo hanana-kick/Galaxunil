@@ -410,8 +410,8 @@
     <string name="desktop_env_running">Desktop environment is running</string>
     <string name="desktop_env_reenter">Tap to reenter</string>
     <string name="settings_desktop">Desktop</string>
-    <string name="desktop_mode">Desktop emulation mode</string>
-    <string name="desktop_mode_summary">Opens all Linux programs in one window with a task bar, like a desktop computer. For devices without freeform windows. Closing it keeps the programs running; the notification brings it back.</string>
+    <string name="desktop_mode">Single-window desktop fallback</string>
+    <string name="desktop_mode_summary">Opens all Linux programs in one window with a task bar, like a desktop computer. For devices without freeform windows. In Android desktop mode or Samsung DeX, Linux apps instead open as separate Android windows.</string>
     <string name="desktop_open">Open desktop</string>
     <string name="desktop_wallpaper">Wallpaper</string>
     <string name="desktop_wallpaper_choose">Choose wallpaper</string>

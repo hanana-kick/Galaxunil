@@ -76,6 +76,9 @@ class Compositor {
 
     val isRunning get() = handle != 0L
 
+    @Volatile var windowSession = java.util.UUID.randomUUID().toString()
+        private set
+
     fun addListener(l: Listener) = listeners.add(l)
     fun removeListener(l: Listener) = listeners.remove(l)
 
@@ -83,6 +86,7 @@ class Compositor {
     @Synchronized
     fun start(config: Config): Boolean {
         if (thread != null) return isRunning
+        windowSession = java.util.UUID.randomUUID().toString()
         val ready = CountDownLatch(1)
         val t = Thread({
             val h = nativeCreate(
@@ -172,25 +176,14 @@ class Compositor {
     private val main = Handler(Looper.getMainLooper())
 
     /**
-     * The user removed the window from recents: ask the application to
-     * close, and end it after [CLOSE_GRACE_MS] unless it did, or another
-     * of its windows (a "save changes?" dialog, say) is open on screen.
+     * Closing a native Android task requests a graceful Wayland close of
+     * only its toplevel; it must not terminate the Linux application process.
+     * The client may still need to save or service other windows.
      */
     fun closeFromHost(id: Int) {
+        if (!toplevels.containsKey(id)) return
         lastHostClose = SystemClock.elapsedRealtime()
-        val pid = toplevels[id]?.pid ?: 0
         close(id)
-        main.postDelayed({
-            // The app may answer with new windows (dialogs, a restored
-            // session) that Android does not let it show from the background:
-            // what counts is whether the process still has a visible window
-            val remaining = if (pid != 0) toplevels.values.filter { it.pid == pid }
-                            else listOfNotNull(toplevels[id])
-            if (remaining.isNotEmpty() && remaining.none { it.id in hosted }) {
-                Log.i(TAG, "toplevel $id (pid $pid) still has hidden windows, ending its client")
-                kill(remaining.first().id)
-            }
-        }, CLOSE_GRACE_MS)
     }
 
     fun touch(id: Int, action: Int, slot: Int, x: Float, y: Float, time: Int) =
@@ -306,6 +299,7 @@ class Compositor {
     private fun onToplevelClosed(id: Int) {
         Log.i(TAG, "toplevel $id closed")
         toplevels.remove(id)
+        hosted.remove(id)
         owners.remove(id)
         for (l in listeners) runCatching { l.onToplevelClosed(id) }.onFailure { Log.e(TAG, "listener", it) }
     }
@@ -352,7 +346,6 @@ class Compositor {
     private external fun nativeStats(h: Long, id: Int, out: LongArray): Boolean
 
     companion object {
-        const val CLOSE_GRACE_MS = 3000L
         private const val TAG = "dn-compositor"
 
         // Must match enum dnc_touch_action

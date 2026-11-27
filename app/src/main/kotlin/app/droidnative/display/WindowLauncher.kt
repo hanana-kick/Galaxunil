@@ -8,184 +8,218 @@ import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import android.view.View
-import android.view.WindowManager
+import android.view.WindowInsets
 import app.droidnative.apps.WindowSettings
 import app.droidnative.display.desktop.DesktopMode
 import app.droidnative.display.desktop.DesktopState
 import app.droidnative.env.EnvService
-import java.lang.ref.WeakReference
 import kotlin.math.roundToInt
 
 /**
- * Opens the Android window ([WindowActivity]) of a Linux toplevel.
- *
- * Android opens a new task fullscreen unless it gets launch bounds, also
- * while the user works in freeform or desktop (DeX) windows. So while the
- * last used DroidNative window is such a window ([desktopMode], kept up to
- * date by [noteWindow]), a new window waits up to [SIZE_WAIT_MS] for the
- * size of the program's first frame ([Compositor.Listener.onToplevelSize])
- * and opens as a freeform window of that size: buffer pixels divided by the
- * render factor (per-app resolution), plus the caption bar Android draws
- * inside the bounds. It is centred on the last used window and started
- * from it: Android passes a source activity's freeform mode on to the new
- * task, while bounds alone are ignored where freeform is only switched on
- * in the developer options (seen on Android 13).
- *
- * The same mode switches GTK's own title bar off for windows created while
- * it lasts ([Compositor.serverDecorations]).
- *
- * With desktop emulation on (display/desktop/DesktopMode.kt) every window
- * goes into the desktop instead, also after waiting for its first frame,
- * whose size the desktop window takes.
+ * One Android document task per Wayland toplevel. Choose the current *visible*
+ * Android activity on the main thread, so an already-rendering Firefox window
+ * can launch the new toplevel created by detaching a tab. A service alone does
+ * not launch UI: EnvService offers a user-initiated notification instead.
  */
 object WindowLauncher : Compositor.Listener {
-
     @Volatile var desktopMode = false
         private set
-    @Volatile private var lastBounds: Rect? = null
-    @Volatile private var lastWindow: WeakReference<Activity>? = null
-    // Caption bar inside freeform bounds, measured in our windows; -1 unknown
-    @Volatile private var captionPx = -1
 
     private val handler = Handler(Looper.getMainLooper())
-    private val waiting = HashMap<Int, MutableList<() -> Unit>>()
+    private val visible = LinkedHashSet<Activity>()
+    private val hosts = HashMap<Int, Host>()
+    private val waiting = HashMap<Int, Request>()
+    private val starting = HashMap<Int, Start>()
     private var listening = false
 
-    /**
-     * True for a freeform or desktop window. Android has no public API for
-     * the windowing mode; its configuration string names it, and Samsung
-     * DeX has its own flag.
-     */
+    private data class Host(val tl: Compositor.Toplevel, val activity: WindowActivity)
+    private data class Start(val tl: Compositor.Toplevel, val deadline: Long)
+
+    private class Request(val tl: Compositor.Toplevel) {
+        var preferred: Activity? = null
+        var reopen = false
+        val callbacks = mutableListOf<() -> Unit>()
+    }
+
     fun isDesktopWindow(activity: Activity): Boolean {
         val cfg = activity.resources.configuration
         if (samsungDesktop(cfg)) return true
-        return activity.isInMultiWindowMode && "mWindowingMode=freeform" in cfg.toString()
+        if (!activity.isInMultiWindowMode) return false
+        // A native caption bar is public. The configuration text is a fallback
+        // for builds whose caption insets are not dispatched to the app.
+        if (Build.VERSION.SDK_INT >= 30 &&
+            (activity.window.decorView.rootWindowInsets?.getInsetsIgnoringVisibility(
+                WindowInsets.Type.captionBar())?.top ?: 0) > 0) return true
+        return Regex("""mWindowingMode\s*=\s*freeform\b""").containsMatchIn(cfg.toString())
     }
 
     private fun samsungDesktop(cfg: Configuration): Boolean = runCatching {
         val c = Configuration::class.java
-        c.getField("semDesktopModeEnabled").getInt(cfg) == c.getField("SEM_DESKTOP_MODE_ENABLED").getInt(null)
+        c.getField("semDesktopModeEnabled").getInt(cfg) ==
+            c.getField("SEM_DESKTOP_MODE_ENABLED").getInt(null)
     }.getOrDefault(false)
 
-    /**
-     * The user works in [activity] now (resumed, focused or resized).
-     * [content]: its content view, whose position shows the caption bar.
-     */
-    fun noteWindow(activity: Activity, content: View? = null) {
-        val desktop = isDesktopWindow(activity)
-        desktopMode = desktop
-        EnvService.compositor.serverDecorations = desktop || DesktopMode.enabled(activity)
-        if (!desktop) return
-        lastWindow = WeakReference(activity)
-        val b = windowBounds(activity) ?: return
-        lastBounds = b
-        if (content != null && content.isLaidOut) {
-            val pos = IntArray(2)
-            content.getLocationOnScreen(pos)
-            val caption = pos[1] - b.top
-            if (caption >= 0 && caption < b.height() / 3) captionPx = caption
-        }
+    /** Called on start, focus or resize, and paired with [forgetWindow] on stop. */
+    fun noteWindow(activity: Activity) {
+        visible.remove(activity)
+        visible.add(activity)
+        if (!activity.hasWindowFocus()) return
+        val nativeDesktop = isDesktopWindow(activity)
+        desktopMode = nativeDesktop
+        EnvService.compositor.serverDecorations = nativeDesktop || DesktopMode.shouldEmulate(activity)
+        if (nativeDesktop && DesktopState.host != null) DesktopMode.leaveEmulation(activity)
     }
 
-    /**
-     * Opens the window of [tl] from [context], then runs [then] on the main
-     * thread (also when the start failed).
-     */
-    fun open(context: Context, tl: Compositor.Toplevel, then: () -> Unit = {}) {
-        val emulated = DesktopMode.enabled(context)
-        val go = if (emulated) ({ openInDesktop(context, tl); then() }) else ({ start(context, tl); then() })
-        if ((!desktopMode && !emulated) || tl.width > 0) {
-            handler.post(go)
-            return
-        }
-        synchronized(waiting) {
+    fun forgetWindow(activity: Activity) {
+        visible.remove(activity)
+    }
+
+    fun hosted(tl: Compositor.Toplevel, activity: WindowActivity) {
+        hosts[tl.id] = Host(tl, activity)
+        starting.remove(tl.id)
+    }
+
+    fun unhosted(id: Int, activity: WindowActivity): Boolean {
+        val host = hosts[id]?.takeIf { it.activity === activity } ?: return false
+        hosts.remove(id)
+        return EnvService.compositor.toplevels[id] === host.tl
+    }
+
+    fun hasNativeHost(id: Int): Boolean =
+        hosts[id]?.let { it.tl === EnvService.compositor.toplevels[id] } == true
+
+    private fun isNativeWindowPending(tl: Compositor.Toplevel): Boolean =
+        starting[tl.id]?.let { it.tl === tl && it.deadline > SystemClock.elapsedRealtime() } == true
+
+    private fun usable(activity: Activity): Boolean =
+        activity in visible && !activity.isFinishing && !activity.isDestroyed &&
+            activity.window.decorView.isAttachedToWindow && activity.window.decorView.isShown
+
+    private fun source(preferred: Activity?): Activity? {
+        val candidates = visible.filter(::usable)
+        return preferred?.takeIf { usable(it) && it.hasWindowFocus() }
+            ?: candidates.lastOrNull { it.hasWindowFocus() }
+            ?: preferred?.takeIf(::usable)
+            ?: candidates.lastOrNull()
+    }
+
+    /** Coalesce service+launcher events for the same toplevel; never dedupe by app/PID. */
+    fun open(context: Context, tl: Compositor.Toplevel, reopen: Boolean = false, then: () -> Unit = {}) {
+        handler.post {
+            if (EnvService.compositor.toplevels[tl.id] !== tl) {
+                then()
+                return@post
+            }
             if (!listening) {
                 EnvService.compositor.addListener(this)
                 listening = true
             }
-            waiting.getOrPut(tl.id) { mutableListOf() } += go
+            val queued = waiting[tl.id]
+            val req = queued?.takeIf { it.tl === tl } ?: Request(tl).also { waiting[tl.id] = it }
+            if (context is Activity) req.preferred = context
+            req.reopen = req.reopen || reopen
+            req.callbacks += then
+            if (queued === req) return@post
+            queued?.callbacks?.forEach { it() }
+            if (tl.width > 0) handler.post { release(tl.id, req) }
+            else handler.postDelayed({ release(tl.id, req) }, SIZE_WAIT_MS)
         }
-        handler.postDelayed({ release(tl.id) }, SIZE_WAIT_MS)
     }
 
     override fun onToplevelSize(toplevel: Compositor.Toplevel) {
-        handler.post { release(toplevel.id) }
+        handler.post {
+            waiting[toplevel.id]?.takeIf { it.tl === toplevel }?.let { release(toplevel.id, it) }
+        }
     }
 
     override fun onToplevelClosed(id: Int) {
-        synchronized(waiting) { waiting.remove(id) }
+        handler.post {
+            starting.remove(id)
+            waiting.remove(id)?.callbacks?.forEach { it() }
+        }
     }
 
-    private fun release(id: Int) {
-        val run = synchronized(waiting) { waiting.remove(id) } ?: return
-        for (r in run) r()
-    }
-
-    private fun openInDesktop(context: Context, tl: Compositor.Toplevel) {
-        DesktopState.host?.addWindow(tl)
-        DesktopMode.open(context)
-    }
-
-    private fun start(context: Context, tl: Compositor.Toplevel) {
+    private fun release(id: Int, req: Request) {
+        if (!waiting.remove(id, req)) return
         try {
-            val bounds = if (desktopMode) launchBounds(context, tl) else null
-            if (bounds != null) {
-                val source = lastWindow?.get()?.takeIf { !it.isFinishing && !it.isDestroyed } ?: context
-                Log.i(TAG, "toplevel ${tl.id}: freeform window $bounds (first frame ${tl.width}x${tl.height})")
-                source.startActivity(WindowActivity.intent(source, tl.id),
-                    ActivityOptions.makeBasic().setLaunchBounds(bounds).toBundle())
-            } else {
-                context.startActivity(WindowActivity.intent(context, tl.id))
+            if (EnvService.compositor.toplevels[id] !== req.tl) return
+            val host = source(req.preferred) ?: return
+            val nativeDesktop = isDesktopWindow(host)
+            if (DesktopMode.shouldEmulate(host, nativeDesktop)) {
+                // Already mapped popups are painted with their parent by the
+                // native compositor, so only toplevels enter this path.
+                DesktopState.host?.takeIf { !it.isFinishing }?.addWindow(req.tl)
+                if (host !== DesktopState.host || req.reopen) DesktopMode.open(host)
+            } else if (req.reopen || !hasNativeHost(id) && !isNativeWindowPending(req.tl)) {
+                start(host, req.tl, nativeDesktop)
             }
+        } finally {
+            req.callbacks.forEach { it() }
+        }
+    }
+
+    /** Move already-open emulated windows without waiting for a second first frame. */
+    fun handoverFromDesktop(activity: Activity) {
+        if (!usable(activity) || !isDesktopWindow(activity)) return
+        EnvService.compositor.toplevels.values.sortedBy { it.id }.forEach { tl ->
+            if (!hasNativeHost(tl.id) && !isNativeWindowPending(tl)) start(activity, tl, true)
+        }
+    }
+
+    private fun start(source: Activity, tl: Compositor.Toplevel, nativeDesktop: Boolean) {
+        try {
+            starting[tl.id] = Start(tl, SystemClock.elapsedRealtime() + START_TIMEOUT_MS)
+            val options = ActivityOptions.makeBasic()
+            if (Build.VERSION.SDK_INT >= 26) {
+                val displayId = source.window.decorView.display?.displayId
+                if (displayId != null) options.setLaunchDisplayId(displayId)
+            }
+            if (nativeDesktop) launchBounds(source, tl)?.let { options.setLaunchBounds(it) }
+            // Do not force a private windowing-mode setting. DeX and Android
+            // Desktop Windowing own the task chrome, position and sizing.
+            source.startActivity(WindowActivity.intent(source, tl.id), options.toBundle())
         } catch (e: Exception) {
+            starting.remove(tl.id)
             Log.w(TAG, "cannot open window for ${tl.id}", e)
         }
     }
 
-    private fun launchBounds(context: Context, tl: Compositor.Toplevel): Rect? {
-        val display = displayBounds(context)
-        val last = lastBounds
-        val density = context.resources.displayMetrics.density
-        val caption = if (captionPx >= 0) captionPx else (DEFAULT_CAPTION_DP * density).roundToInt()
-        var w: Int
-        var h: Int
-        if (tl.width > 0 && tl.height > 0) {
-            val factor = WindowSettings.forClient(context, tl.pid).renderFactor.takeIf { it > 0f } ?: 1f
-            w = (tl.width / factor).roundToInt()
-            h = (tl.height / factor).roundToInt() + caption
-        } else if (last != null) {
-            w = last.width()
-            h = last.height()
+    private fun launchBounds(source: Activity, tl: Compositor.Toplevel): Rect? {
+        val wm = source.windowManager
+        val density = source.resources.displayMetrics.density
+        val (display, base) = if (Build.VERSION.SDK_INT >= 30) {
+            val max = wm.maximumWindowMetrics
+            val insets = max.windowInsets.getInsetsIgnoringVisibility(
+                WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+            val work = Rect(max.bounds)
+            work.inset(insets.left, insets.top, insets.right, insets.bottom)
+            work to wm.currentWindowMetrics.bounds
         } else {
-            w = display.width() * 2 / 3
-            h = display.height() * 2 / 3
+            @Suppress("DEPRECATION")
+            val metrics = source.resources.displayMetrics
+            Rect(0, 0, metrics.widthPixels, metrics.heightPixels) to null
         }
-        w = w.coerceIn(1, display.width())
-        h = h.coerceIn(1, display.height())
-        val cx = last?.centerX() ?: display.centerX()
-        val cy = last?.centerY() ?: display.centerY()
-        val left = (cx - w / 2).coerceIn(display.left, display.right - w)
-        val top = (cy - h / 2).coerceIn(display.top, display.bottom - h)
-        return Rect(left, top, left + w, top + h)
-    }
-
-    private fun windowBounds(activity: Activity): Rect? =
-        if (Build.VERSION.SDK_INT >= 30) activity.windowManager.currentWindowMetrics.bounds
+        if (display.isEmpty) return null
+        val caption = if (Build.VERSION.SDK_INT >= 30)
+            source.window.decorView.rootWindowInsets?.getInsetsIgnoringVisibility(WindowInsets.Type.captionBar())?.top
         else null
-
-    // The service has no window; fall back to the display metrics there
-    private fun displayBounds(context: Context): Rect {
-        if (Build.VERSION.SDK_INT >= 30) {
-            runCatching { context.getSystemService(WindowManager::class.java)?.maximumWindowMetrics?.bounds }
-                .getOrNull()?.let { return it }
-        }
-        return context.resources.displayMetrics.let { Rect(0, 0, it.widthPixels, it.heightPixels) }
+        val factor = WindowSettings.forClient(source, tl.pid).renderFactor.takeIf { it > 0f } ?: 1f
+        val out = IndependentWindowBounds.calculate(
+            WindowArea(display.left, display.top, display.right, display.bottom),
+            base?.let { WindowArea(it.left, it.top, it.right, it.bottom) },
+            (tl.width / factor).roundToInt(), (tl.height / factor).roundToInt(),
+            caption?.takeIf { it > 0 } ?: (DEFAULT_CAPTION_DP * density).roundToInt(),
+            (CASCADE_DP * density).roundToInt(), tl.id
+        )
+        return Rect(out.left, out.top, out.right, out.bottom)
     }
 
     private const val TAG = "dn-window"
-    // A Wayland program draws its first frame right after the first configure
     private const val SIZE_WAIT_MS = 400L
+    private const val START_TIMEOUT_MS = 1500L
     private const val DEFAULT_CAPTION_DP = 40
+    private const val CASCADE_DP = 28
 }

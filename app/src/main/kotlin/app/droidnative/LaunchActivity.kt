@@ -87,8 +87,6 @@ class LaunchActivity : ComponentActivity(), Compositor.Listener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Started from a freeform or desktop window: the app's window opens as one too
-        WindowLauncher.noteWindow(this)
         val route = intent.data?.takeIf { it.scheme == Shortcuts.SCHEME }
         val id = route?.lastPathSegment
         EnvController.refresh(this)
@@ -164,6 +162,21 @@ class LaunchActivity : ComponentActivity(), Compositor.Listener {
                 }
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        WindowLauncher.noteWindow(this)
+    }
+
+    override fun onStop() {
+        WindowLauncher.forgetWindow(this)
+        super.onStop()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) WindowLauncher.noteWindow(this)
     }
 
     private fun start(e: DesktopEntry) {

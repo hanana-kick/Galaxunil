@@ -30,3 +30,15 @@ Settings → Secrets and variables → Actions에 다음 저장소 시크릿을 
 | `GALAXUNIL_KEY_PASSWORD` | 서명 키 비밀번호 |
 
 릴리스 버전명은 태그에서, Android 버전 코드는 워크플로 실행 번호에서 가져옵니다. 시크릿이 없거나 서명 검증이 실패하면 배포하지 않습니다. 장치의 업데이트 서명을 유지하려면 같은 배포 키를 계속 사용해야 합니다.
+
+## Android 에뮬레이터 스모크
+
+프로젝트 앱이 아직 설치되지 않은 전용 에뮬레이터로 실행합니다. 실제 기기나 기존 앱 데이터가 있는 환경에서는 실행하지 않습니다.
+
+```sh
+tests/device/run.sh emulator-5554
+```
+
+빌드한 앱과 테스트 APK를 별도로 지정할 수도 있습니다. 실행기는 APK의 패키지 ID와 설치된 instrumentation 연결을 검사합니다. 테스트는 Android 메인 화면을 열고 번들 Debian에서 `/etc/os-release`와 `apt-get --version`을 실제로 읽습니다. 실행 결과가 없거나 완료되지 않은 경우, 모두 건너뛴 경우는 실패입니다. 이전 DroidNative/Void용 테스트들은 이 판정에 포함하지 않습니다.
+
+이 검사는 APT 네트워크 연결, 패키지 설치, Firefox 창, 하드웨어 가속을 검증하지 않습니다.

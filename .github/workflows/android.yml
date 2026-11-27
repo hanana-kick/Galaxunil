@@ -29,7 +29,11 @@ jobs:
           java-version: '21'
       - name: Install Android SDK packages
         shell: bash
-        run: sdkmanager 'platforms;android-37' 'build-tools;37.0.0'
+        run: |
+          export ANDROID_HOME="$RUNNER_TEMP/galaxunil-android-sdk"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          bash tools/install_android_sdk.sh
+          printf 'ANDROID_HOME=%s\nANDROID_SDK_ROOT=%s\n' "$ANDROID_HOME" "$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
       - name: Verify and prepare runtime assets
         run: python3 tools/bootstrap_assets.py
       - name: Test the AppStream parser
@@ -79,7 +83,10 @@ jobs:
       - name: Build the Android release APK
         shell: bash
         run: |
-          sdkmanager 'platforms;android-37' 'build-tools;37.0.0'
+          export ANDROID_HOME="$RUNNER_TEMP/galaxunil-android-sdk"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          bash tools/install_android_sdk.sh
+          printf 'ANDROID_HOME=%s\nANDROID_SDK_ROOT=%s\n' "$ANDROID_HOME" "$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
           python3 tools/bootstrap_assets.py
           ./gradlew --no-daemon --console=plain \
             "-PgalaxunilVersionName=${GITHUB_REF_NAME#v}" \

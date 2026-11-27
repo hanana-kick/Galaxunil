@@ -23,7 +23,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.droidnative.R
@@ -61,10 +60,10 @@ internal fun LiveDiagnosticToggle(modifier: Modifier = Modifier) {
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(stringResource(R.string.live_diagnostic_pair_hint))
-                    OutlinedTextField(value = code, onValueChange = { code = it.trim().take(64) },
+                    OutlinedTextField(value = code, onValueChange = { if (it.length <= 4 && it.all { char -> char in '0'..'9' }) code = it },
                         label = { Text(stringResource(R.string.live_diagnostic_code)) },
-                        singleLine = true, visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
                 }
             },
             confirmButton = {

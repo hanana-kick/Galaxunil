@@ -2,8 +2,8 @@
 <resources>
     <string name="live_diagnostic_title">Live diagnostics</string>
     <string name="live_diagnostic_hint">Off. Enable temporarily to send Galaxunil events to your private dashboard.</string>
-    <string name="live_diagnostic_pair_hint">Enter a 15-minute code from the private dashboard. Only Galaxunil event types are sent while the switch is on. No raw logs, URLs, paths, screenshots or device identifiers are sent. No messages are sent after the session ends.</string>
-    <string name="live_diagnostic_code">Connection code</string>
+    <string name="live_diagnostic_pair_hint">Enter the 4-digit code from the private dashboard within 2 minutes. Only Galaxunil event types are sent while the switch is on. No raw logs, URLs, paths, screenshots or device identifiers are sent. No messages are sent after the session ends.</string>
+    <string name="live_diagnostic_code">4-digit connection code</string>
     <string name="live_diagnostic_connect">Start sending</string>
     <string name="live_diagnostic_connecting">Connecting…</string>
     <string name="live_diagnostic_active">Sending Galaxunil events. Turn this off to stop.</string>

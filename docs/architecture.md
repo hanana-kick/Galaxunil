@@ -1,0 +1,546 @@
+# Architecture
+
+How DroidNative runs a Linux system on unmodified Android without root.
+
+```
+Android app (Kotlin, NDK C)
+  EnvService          foreground service that keeps everything alive
+    proot + loader    from the APK's native library directory
+      Void Linux      glibc rootfs in the app's private storage
+        session.sh    D-Bus session bus, PulseAudio, dn-xwm + Xwayland
+        applications  one proot process per launched app
+    compositor        Wayland server in the app process (C, NDK)
+    device bridges    camera, sensors, location, microphone
+  MainActivity        Overview, Install and Settings tabs (Compose)
+  WindowActivity      one Android task per Linux toplevel window
+  LaunchActivity      target of home screen shortcuts
+  BootReceiver        optional start with the phone
+```
+
+Source layout: `app/` (Android app), `native-host/` (Android builds of
+proot, libffi, libwayland-server), `guest-tools/` (sources of the
+droidnative-tools package), `tests/` (PC and device tests). The Void
+packages themselves are built in the xbps-repository repository.
+
+## Running programs without root
+
+**Exec restriction.** Apps that target Android 10 (API 29) or newer may not
+`execve()` files in their writable data directory. DroidNative therefore
+ships every host executable (proot and its loader) as `lib*.so` in the APK
+with `android:extractNativeLibs="true"` and runs it from the read-only
+native library directory (`native-host/build.sh`, `env/Proot.kt`). Linux
+programs in the rootfs are never executed by the kernel directly: proot
+turns their `execve` into a start of its loader, which maps the program
+with `mmap`. Mapping data files as executable stays allowed.
+
+**Two flavours.** `fdroid` targets API 28, where executing from the data
+directory is still allowed (as Termux does), and runs on Android 7.0 (API
+24) and newer; it can only be sideloaded or distributed through F-Droid.
+`play` targets the current API level and needs Android 10 (API 29). Both
+use the native library directory, so there is one code path.
+
+**proot.** The Termux fork of proot emulates root, mounts, namespaces and
+hard links (as symlinks, `--link2symlink`) through ptrace. DroidNative
+builds its own fork of it (https://github.com/DroidNative/proot, commit
+pinned in `native-host/build.sh`): bubblewrap and Flatpak
+support, `fchmodat2`, SysV shared memory through memfd (Android denies
+`/dev/ashmem` to API 29+ apps), and the V4L2 camera devices. In the
+`pivot_root` emulation the mount that becomes the new root moves to `/`:
+bubblewrap pivots into a tmpfs mounted over `/tmp` and reads
+bind sources such as the X11 socket through `/oldroot/tmp`.
+
+**User.** Applications run as `user` (uid 1000, home `/home/user`);
+package management runs as emulated root. `sudo` needs no password.
+
+**Chromium sandbox.** Chromium, Electron and CEF programs abort under
+PRoot (SIGTRAP): their sandbox needs a setuid helper or user namespaces.
+`libdn-appenv` (droidnative-tools, `files/dn-appenv.c`), listed in the
+guest's `/etc/ld.so.preload` by the package's INSTALL script, wraps
+`exec*` and `posix_spawn*` and adds `--no-sandbox` when the program is at
+least 32 MiB with `icudtl.dat` and a V8 snapshot beside it (that leaves out
+helpers such as `opera_crashreporter`, which reject the switch, and
+`--type=` child processes). Flatpak apps have their own `/etc`: for a
+`flatpak run` of an app that ships such a binary (searched three levels
+deep in its files), the hook adds `--filesystem=host-os:ro` and
+`--env=LD_PRELOAD=/run/host/usr/lib/droidnative/libdn-appenv.so` to that
+run, so the library does the same inside the sandbox. Chromium's own
+Flatpak sandbox (the portal's Spawn) cannot work under PRoot either.
+Test: `tests/host/appenv/run.sh`.
+
+**libpci.** pciutils ends the whole process (`exit(1)`) when neither
+`/sys/bus/pci` nor `/proc/bus/pci` can be read, which Android's SELinux
+denies. Chromium probes the GPU through it at start (its GPU process died
+three times) and again after a minute, in the browser process: Opera
+closed after 60 s. `FakeSysdata` binds an empty directory at
+`/proc/bus/pci` (no devices).
+
+**Exit status.** proot exits with the status of its first process, 128 +
+signal when that was killed (patch 0004), as a shell would; unpatched it
+reported whichever process ended last, so a browser's `exit(1)` came back
+as 0.
+
+**Phantom process killer.** Android 12 and newer kill background child
+processes beyond 32 across all apps. Keep processes few, or turn the
+limit off (developer option on Android 14+, or
+`adb shell settings put global settings_enable_monitor_phantom_procs false`).
+
+## Display
+
+The app contains its own Wayland compositor (`app/src/main/cpp/compositor`,
+C99): wl_compositor, wl_shm, xdg-shell, linux-dmabuf v3, xdg-decoration
+(always server side), KDE server-decoration, text-input v3, wp_viewporter,
+xwayland-shell and the private `dn_xwm_v1`. Every toplevel gets its own
+Android task (`WindowActivity`) and is resized to fill it; the Android
+window is the decoration. Buffers are copied into GLES textures and drawn
+on the Android surface.
+
+Freeform and desktop (DeX) windows (`display/WindowLauncher.kt`): Android
+opens a new task fullscreen unless it gets launch bounds. While the last
+used DroidNative window is freeform (`WindowLauncher.noteWindow`, called
+by WindowActivity on focus and resize and by LaunchActivity), a new
+toplevel waits up to 400 ms for its first frame, which the program draws
+at its own size after the initial 0x0 configure. The compositor reports
+that size once, if the toplevel has no window yet (`toplevel_size`
+callback in `dnc_xdg_surface_commit`, `compositor/xdg.c`; buffer pixels).
+The window then opens with that size divided by the render factor
+(per-app resolution), plus the caption bar measured in an earlier freeform
+window, centred on the last used window, and started from that window:
+Android passes the source activity's freeform mode on, while bounds alone
+are ignored where freeform is only a developer option. EnvService,
+LaunchActivity and NotificationOpenActivity all open windows through
+`WindowLauncher.open`.
+
+Desktop emulation (Settings, "Desktop emulation mode", `Prefs.desktopEmulation`;
+`display/desktop/`), for devices without freeform windows: every toplevel
+opens in one Android task, `DesktopActivity`, instead of its own. Each
+window is a `DesktopWindowView`: a title bar drawn by the app (icon,
+title, minimise, maximise, close; drag moves, double tap maximises), the
+content as a TextureView (SurfaceViews cannot overlap in a defined order)
+and a resize grip that shows an outline and applies the size when let go.
+Three fingers moving anywhere on a window move it (`onInterceptTouchEvent`:
+only after they passed the touch slop, so a three-finger tap still reaches
+the program). When the desktop's width changes (rotation), windows shrink
+to it if needed and move fully into view; a height change alone (keyboard,
+task bar) only keeps title bars reachable (`DesktopActivity.fitWindows`).
+The application menu is placed inside the desktop area by hand
+(`showAtLocation`): Android moves a drop-down that does not fit within
+the whole edge-to-edge window, over the status bar and task bar.
+New windows take their first frame's size (`WindowLauncher.open` waits for
+it, as for freeform) and cascade. The task bar holds the application menu
+(apps from `LinuxApps.list`, started through LaunchActivity; wallpaper,
+settings, leave), a button per window (tap focuses, tap on the focused
+one minimises), the keyboard button, a clock and a button that collapses
+it to a round handle. Input is shared with WindowActivity through
+`display/ToplevelInput.kt` (mouse modes, mouse, captured pointer, keys,
+on-screen keyboard text); hardware keys go to the focused window.
+`DesktopState` keeps positions, stacking, minimised and maximised windows
+and the task bar state for the life of the process. Closing the desktop
+(Back, or removing it from recents) only detaches the surfaces: the
+programs run on, and the environment notification ("Desktop environment
+is running", "Tap to reenter", `EnvService.buildNotification`) reopens
+it. Switching the mode on hands open windows over from their
+WindowActivity (`Compositor.Listener.onDesktopEmulation`), switching it
+off reopens them in their own tasks (`DesktopMode.set`); `Compositor.attach`
+and `detach` take the host as owner, so a host going away cannot detach a
+window the next host already attached. The desktop always uses server
+decorations. Wallpaper (`desktop/Wallpaper.kt`): the bundled
+`res/drawable-nodpi/desktop_wallpaper.png` (cropped around a focus point
+in portrait) or an image picked in Settings or the desktop menu, stored
+as `files/desktop/wallpaper.jpg`. Per-app rotation does not apply inside
+the desktop.
+
+GTK 3 ignores xdg-decoration; it draws its own title bar unless KDE's
+`org_kde_kwin_server_decoration_manager` announces the default mode
+"server" (`compositor/decoration.c`, `protocol/server-decoration.xml`,
+reduced to the interface). The same desktop mode sets it
+(`Compositor.serverDecorations` -> `dnc_set_server_decorations`): "server"
+in freeform and desktop windows, which have Android's caption bar,
+"client" in fullscreen tasks, where GTK's bar holds the only close button.
+GTK reads the mode when it creates a window, so open windows keep their
+choice; header bars that are part of the content (GtkAboutDialog) stay.
+
+Content that does not match its window is zoomed to fit, keeping its
+aspect ratio, and centred (`dnc_toplevel_view` in `compositor/server.c`;
+input is mapped back in `compositor/seat.c`). That covers fixed-size
+windows (minimum = maximum size: they get no size or maximized state in
+`dnc_toplevel_configure`, `compositor/xdg.c`) and fullscreen games that
+draw at their own size. A fullscreen request is answered with the
+fullscreen state; with maximized, SDL takes it as refused and sizes itself
+to the output. The output (`compositor/output.c`) is reported in landscape,
+since SDL2 reads its mode once at start and sizes exclusive fullscreen by
+it, and a client's output later follows its window's size for clients that
+track changes.
+
+A toplevel whose minimum size exceeds its window (Opera: 660 logical px
+wide, a phone window at scale 2 is 540) is offered the window's aspect
+ratio scaled up to that minimum, so the zoom fills the window without
+bars (`dnc_toplevel_configure`; `set_min_size` reconfigures).
+
+X11 programs run on rootless Xwayland (`DISPLAY=:0`). `dn-xwm`
+(`guest-tools/dn-xwm.c`) starts it and is
+its window manager: it tells the compositor which X window is a toplevel
+or a popup (menus) through `dn_xwm_v1`. X toplevels take their Android
+window's size, except fixed-size ones (WM_NORMAL_HINTS), which keep theirs,
+and fullscreen ones (`_NET_WM_STATE_FULLSCREEN`), which get the X screen's
+size because SDL draws for that size without asking; the compositor zooms
+both. Xwayland listens only on the socket
+file in the guest's `/tmp`, not on an abstract socket (those are shared
+with every Android app).
+
+A program that ends abnormally after its window opened (error code,
+killed, crashed) is reported with a notification naming the cause, e.g.
+SIGKILL as "usually low memory"; it opens the loading screen's log view
+(`LaunchActivity.reportEnded`). Ends the user caused (swiped away, stopped
+environment, SIGTERM) are not reported. When Android ended DroidNative
+itself (low memory killer, crash), the next start says so once
+(`MainActivity.lastExitNotice`, ApplicationExitInfo, API 30+).
+
+Closing: swiping a window away in Android's recent apps asks the
+application to close it (`xdg_toplevel.close`, `WM_DELETE_WINDOW`). If the
+process still has windows 3 seconds later and none of them is on screen
+(apps often answer a close with a dialog or a restored session, which
+Android does not let them show from the background), it is ended: the
+Wayland client is disconnected, the X client killed through dn-xwm
+(`Compositor.closeFromHost`). Back moves a window to the background
+without closing it. A window opened while DroidNative is in the background
+appears as a notification; tapping it shows the window.
+
+Hardware keyboards send their scancodes unchanged. Android has no public
+API for the name of the chosen keyboard layout, so `display/HardwareKeyboard.kt`
+generates an xkb layout from the keyboard's character map (what each
+physical key types plain, with Shift, AltGr and both, dead keys included;
+`InputDevice.getKeyCodeForKeyLocation`, Android 13+), compiles it in the
+guest with `xkbcli` and gives it to the compositor, which sends the new
+keymap to every client. Right Alt then selects level 3 (AltGr). Without a
+hardware keyboard the default US keymap stays. Mouse wheels send discrete
+notches (X11 programs need them), side buttons arrive as BTN_SIDE and
+BTN_EXTRA.
+
+Pointer capture: the compositor implements pointer-constraints and
+relative-pointer (`compositor/constraints.c`), which SDL games and
+Xwayland (X11 pointer grabs) use. A lock is active while its window has
+focus; absolute motion is then ignored and only relative motion is sent.
+Android hears about it (`onPointerLock`): the emulated touchpad hides its
+cursor and sends finger movement as relative motion, emulated mouse
+clicks turn drags into relative motion, and a real mouse is captured with
+Android's pointer capture so it delivers raw movement.
+
+On-screen buttons: [on-screen-buttons.md](on-screen-buttons.md).
+
+Input: touch is turned into touch events, mouse clicks or a touchpad with
+a drawn cursor (`display/TouchInput.kt`); keys and the on-screen keyboard
+go through wl_keyboard and text-input. Windows map back to the
+application that opened them through the process tree, for per-app
+settings ([per-app-settings.md](per-app-settings.md)).
+
+## Graphics
+
+- **Adreno 6xx and newer (Qualcomm):** Mesa's Turnip driver with the KGSL
+  backend talks to `/dev/kgsl-3d0` directly from the glibc rootfs: hardware
+  Vulkan. OpenGL runs on top of it through Zink. Low-end Adreno (610, 702)
+  need `TU_DEBUG=noconform` to expose Vulkan 1.3, which the environment
+  sets. Built for aarch64 and armv7l, so a 32-bit Android on a 64-bit
+  phone gets the same.
+- **Every other GPU (Mali, PowerVR, Adreno up to 5xx):** OpenGL through
+  virgl. The app runs virglrenderer's vtest server (`env/Virgl.kt`,
+  `libvirgl-server.so` from `native-host/build.sh`, patches from Termux's
+  virglrenderer-android in `native-host/patches/virglrenderer`) on
+  Android's own GLES driver; Mesa's virpipe driver in the guest sends it
+  the GL commands over `/run/droidnative/virgl.sock` (`VTEST_SOCKET_NAME`,
+  set in `Proot.guestEnv`). The server forks one renderer per client.
+  Frames come back by CPU readback, so virgl is slower than Turnip but
+  about three times llvmpipe (glmark2 off-screen on the Redmi Note 8T: 447
+  against 155). Vulkan stays lavapipe there.
+- **No GPU at all:** software rendering (llvmpipe/lavapipe).
+- **Flatpak apps** use their runtime's Mesa, so DroidNative installs its
+  own GL extension `org.freedesktop.Platform.GL.droidnative` (Turnip, Zink)
+  and selects it with `FLATPAK_GL_DRIVERS`.
+- `dn-gl <auto|zink|virgl|gl4es|llvmpipe>` picks the OpenGL backend per
+  program (the per-app "Graphics backend" setting). `auto` is Zink when
+  Turnip enumerates the GPU (checked once with `vulkaninfo` and cached in
+  `/run/droidnative/dn-gl-turnip`; `/dev/kgsl-3d0` alone is not enough,
+  Adreno 3xx-5xx have it too), else virgl when its socket exists, else
+  llvmpipe; gl4es runs on the same choice. Programs started without a
+  backend setting do not go through dn-gl and keep Mesa's own choice
+  (Zink on Turnip, llvmpipe elsewhere).
+
+Mali kbase: Mesa's Panfrost/PanVK need the DRM driver (`/dev/dri`), while
+Android phones ship ARM's kbase (`/dev/mali0`). Mesa has no kbase backend
+upstream; community forks exist per GPU generation (PanVK for G615 and
+G720 on CSF, Panfrost for Bifrost and G57), all experimental and tested
+on single phones. Without a Mali test device DroidNative uses virgl
+there; Venus (Vulkan through virglrenderer onto Android's Vulkan driver)
+would be the next step for Vulkan on such GPUs.
+
+Android kernels lack implicit dma-buf synchronisation, so a Mesa patch
+makes the Wayland WSI wait for each frame on the CPU before presenting.
+
+Text input v1 (`compositor/text_input.c`) exists beside v3 for Chromium
+and Electron (Chromium 126 knows only v1, later ones v3 only on request): a v1 input counts as
+active between activate and deactivate on the focused surface.
+
+X11 programs have no text-input protocol. dn-notifyd therefore also
+answers as a minimal Fcitx 5 input method on the session bus, and dn-xwm
+is the XSETTINGS manager with `Gtk/IMModule=fcitx`, so GTK programs on X11
+(Steam's web helper loads GTK 3 through box64) report their text fields
+through the fcitx5-gtk module; SDL does the same with
+`SDL_IM_MODULE=fcitx` (`Proot.baseEnv`). The app opens the keyboard on the
+focused window and types the text as key presses where the keymap has
+the characters, else sends it back as `CommitString`
+(`WindowActivity.sendText`, `Compositor.inputMethodFocus`, details in
+[bridge-protocol.md](bridge-protocol.md)). Keys are needed because
+Chromium (Steam's CEF 126) drops input method text in password fields. GTK on Wayland never reads
+XSETTINGS and keeps text-input.
+
+Surfaces honour `wp_viewporter` destinations (`compositor/viewporter.c`;
+the size replaces buffer size / scale for drawing and input, source crops
+are not drawn yet), input regions (`dnc_region_contains`) and get
+`wl_surface.enter` for the output. Firefox needs the first two: it
+attaches its content subsurface at device resolution with the window size
+as viewport destination, and gives it an empty input region so clicks
+reach the GTK window below.
+
+Firefox and LibreWolf: SELinux denies apps the reopen of a memfd through
+`/proc/self/fd`, so Firefox's parent process uses unsealed `shm_open`
+memory while its children use sealed memfds and reject the parent's
+("Shared memory PlatformHandle is not safe to map", then SIGSEGV).
+`MOZ_SHM_NO_SEALS=1` (`Proot.baseEnv`) makes every process check only the
+size. The content sandbox works through the proot fork's handling of the
+program's own seccomp filter (fork `doc/droidnative-storage.md`).
+
+## x86 programs
+
+On ARM, x86 Linux programs run emulated: box64 (aarch64; its BOX32 mode
+covers 32-bit x86) and box86 (armv7l), both packaged in xbps-repository
+and installed by setup.sh. They replace common libraries (libc, GL,
+SDL, X11, ...) with the native ones, so only the program itself is
+emulated. The kernel's binfmt_misc needs root, so the proot fork emulates
+it (`src/execve/binfmt.c`, called from `expand_shebang`): an `execve` of a
+file matching a rule in the guest's `/etc/binfmt.d` or
+`/usr/lib/binfmt.d` (systemd format, as box64 installs them) becomes a run
+of the rule's interpreter with the program's path in front of its
+arguments. The rules are read from the rootfs and re-read when they
+change; `PROOT_NO_BINFMT=1` switches this off. AppImages for x86 are
+accepted when the emulator is installed (`dn-appimage` `emulator_for`,
+`AppImages.runInstall`).
+
+Wine: package `wine-x86` (aarch64,
+`xbps-repository/srcpkgs/wine-x86`) repackages Kron4ek's portable x86_64
+WoW64 build into `/opt/wine-x86`, with symlinks in `/usr/bin` (`wine`,
+`winecfg`, `wineserver`, ...). WoW64 runs 32-bit Windows programs inside
+the 64-bit Wine, so box64 alone runs both kinds, without BOX32 or 32-bit
+Linux libraries. Wine finds its DLLs next to the real file: box64 sets
+`/proc/self/exe` to the realpath of the program. The libraries Wine
+dlopens (X11, GL, Vulkan, ALSA/Pulse, freetype, fontconfig, gnutls) are
+wrapped by box64, which uses the native ones from the package's
+depends; only pcsclite (smart cards) and v4l2 (webcams) are not wrapped.
+Headers, winegcc and the import libraries are left out (about 100 MB).
+Wine maps PE files privately and relocates them in place before making
+the code executable; Android's SELinux denies that (`execmod`), so the
+proot fork redoes such an `mprotect` on an anonymous copy (fork
+`doc/droidnative-storage.md`, "Exec of written file pages").
+
+Steam: package `droidnative-steam` (aarch64) provides `steam`, which
+downloads Valve's Linux bootstrap on first start and runs it through
+box64 (a box64 commit after 0.4.4: BOX32 needs `__sched_cpualloc`). It
+reaches the sign-in window on the Redmi Note 8T (a minute from the app
+list once installed; the first start downloads about 500 MB). What it
+took, besides binfmt:
+
+- proot's loader sat with its ELF headers at 0x200000, where the non-PIE
+  `steamwebhelper` must load; the loader is now linked with its image base
+  at `LOADER_ADDRESS` (`src/GNUmakefile`).
+- Every tracee has PRoot as tracer in `/proc/<pid>/status`, so Steam's
+  `Plat_IsInDebugSession` saw a debugger and stopped in `int3` after an
+  assertion. Opens of that file get a copy with `TracerPid: 0`
+  (`maybe_hide_tracer`, `src/syscall/enter.c`).
+- Steam accepts a connection of its web UI only after `lsof -i TCP@...`
+  names the connecting process; Android denies apps `/proc/net/tcp` and
+  sock_diag. The fork's `dn_net` extension (`src/extension/dn_net`)
+  records the tracees' TCP sockets (chained getsockname/getpeername after
+  bind, listen, connect and accept) and generates `/proc/net/tcp{,6}`.
+- Android's app seccomp filter traps `set_robust_list`/`get_robust_list`;
+  Chromium aborts without a registered list ("futex robust_list not
+  initialized by pthreads"). PRoot keeps the values per thread
+  (`src/tracee/seccomp.c`).
+- The launcher passes `-cef-force-gpu` (else Steam falls back to
+  SwiftShader, whose x86 Vulkan driver the wrapped native loader cannot
+  use) and `-noverifyfiles` (the verification re-extracted the whole
+  client on every start, minutes under PRoot).
+
+Limits: x86 Flatpak apps do not run yet (inside the sandbox
+`/usr` is the x86 runtime, where the dynamically linked box64 finds no
+ARM libraries), and FEX is not used: it supports only real Linux systems
+(its FAQ rules out Android and leans on syscalls Android's seccomp
+blocks), while box64 is known to work on Android kernels from 4.x on.
+
+## AppImages
+
+Installed AppImages are unpacked once (fast to start, no FUSE needed).
+Run directly, an AppImage also works: its runtime mounts itself through
+proot's FUSE emulation (see "Storage"). `dn-appimage` (droidnative-tools) does the work in the guest: it finds the
+squashfs payload behind the runtime's ELF section headers and unpacks it
+with unsquashfs (the runtime itself is only the fallback, older ones need
+`libz.so`), into `~/.local/share/droidnative/appimages/<id>`, and writes
+`dn-appimage-<id>.desktop`. Own titles and icons live in `.custom/` beside
+the AppDirs and survive a reinstall. `dn-appimage run` starts Electron
+apps (those with `chrome-sandbox`) on native Wayland with
+`--enable-wayland-ime`, so text fields open the keyboard.
+
+The app side is "Manage AppImages" on the Install tab
+(`ui/AppImagesActivity.kt`, `apps/AppImages.kt`): the system file picker
+supplies the file, which is checked (ELF, architecture, free space),
+copied into the guest's `/tmp` and installed with `dn-appimage install
+--move` on a background thread; the list reads the rootfs directly, and
+title, icon (scaled into a 256 px square PNG) and removal go through
+`dn-appimage rename|icon|remove`.
+
+## Sound, session and storage
+
+Services: `env/Services.kt` runs runit's `runsvdir` on `/var/service` as
+emulated root while the environment runs. Void's default service directory
+(gettys, udevd) does not fit, so setup.sh points `/var/service` at the
+empty `/etc/runit/runsvdir/droidnative`; services are enabled the usual way
+(`ln -s /etc/sv/NAME /var/service/`). With "Start with the phone" the
+`BootReceiver` starts the environment, and with it the services, after
+boot.
+
+Light and dark: `apps/GuestTheme.kt` passes DroidNative's colour scheme to
+programs it starts: `gtk-application-prefer-dark-theme` in GTK's
+settings.ini, `ADW_DEBUG_COLOR_SCHEME` for libadwaita (no settings portal
+runs here).
+
+PulseAudio runs in the guest with a pipe sink; the app reads the PCM from
+the FIFO and plays it through `AudioTrack` (`env/AudioOutput.kt`, at
+Android's audio thread priority so busy guests cannot starve it). The sink
+keeps the FIFO full, so the pipe's 64 KiB (340 ms) were pure latency;
+`AudioOutput` shrinks it to 8 KiB with `F_SETPIPE_SZ` (dropping what is
+queued once if it is fuller) and the AudioTrack buffer absorbs late
+deliveries instead. Programs asking for small buffers (OpenAL Soft, SDL)
+underrun many times a second behind the pipe sink, so every guest program
+gets `PULSE_LATENCY_MSEC` (`env/Proot.kt`, Flatpak apps inherit it). Both
+come from the "Audio buffer" setting (`Prefs.audioBufferMs`, default 150
+ms, measured gap-free with SuperTux 2 on GPU and software rendering); the
+AudioTrack part applies at once, the program part on its next start. The
+microphone works the other way round (`devices/MicBridge.kt`). A D-Bus
+session bus runs alongside (`assets/guest/session.sh`).
+
+## Storage
+
+proot is built from the DroidNative fork (pinned commit of
+https://github.com/DroidNative/proot; `DN_PROOT_SRC=<checkout>
+native-host/build.sh` builds a local checkout instead). Its storage
+extension (`src/extension/dn_storage/`, documented in the fork's
+`doc/droidnative-storage.md`) adds three things, all enabled by
+`env/Proot.kt`:
+
+- FAT-like volumes: with "All files access" granted, shared storage is
+  bound at `/media/sdcard` and other volumes at `/media/<volume id>`
+  (`env/StorageMounts.kt`) with `--fat-bind`. Like vfat on a desktop,
+  everything there is owned by the user with mode 0755, chmod succeeds
+  without effect, and programs run although Android mounts all storage
+  noexec: proot copies executable mappings of such files into anonymous
+  memory (the kernel refuses PROT_EXEC on noexec mounts, binfmt handlers
+  never see them).
+- FUSE (`--fuse`): `/dev/fuse` and mount(2) of FUSE file systems are
+  emulated, read-only. proot speaks the FUSE protocol to the daemon and
+  copies what the guest reads into its temporary directory, where programs
+  can run. A FUSE mount goes away when its daemon quits; `FUSERMOUNT_PROG`
+  is `/usr/bin/true` in the guest, since fusermount can't work there.
+- Disk images (`env/DiskImages.kt`, Settings, Storage): folders
+  `DroidNative/images/<name>` on a volume, mounted at `/mnt/<name>`
+  (`--image`). A SQLite database (`dnimage.db`) holds every node (type,
+  mode, owner, symlink target, device number) and directory entry; file
+  contents sit in `data/` under UUID names, so the storage below needs
+  neither permissions nor case sensitivity. proot keeps a shadow tree of
+  the image in its temporary directory and rebuilds it when the
+  database's generation differs. Writes are limited by the storage:
+  about 18 new files per second on the Redmi's SD card; reads are fast.
+
+Cameras, sensors, location and microphone: see
+[device-passthrough.md](device-passthrough.md).
+
+## Packages
+
+The rootfs is the official Void Linux glibc tarball. `assets/guest/setup.sh`
+installs the default packages from Void's mirrors plus DroidNative's own
+from the DroidNative repository: the Turnip and Zink Mesa builds, the
+Flatpak GL extension, gl4es and `droidnative-tools` (dn-gl, dn-xwm,
+dn-appimage, libdn-appenv; sources in `guest-tools/`). That repository is
+built by https://github.com/DroidNative/xbps-repository, whose workflow
+rebuilds a package when Void's rolling updates break it, and published as
+a GitHub release. Its URL is `BuildConfig.XBPS_REPO` (`DN_XBPS_REPO` at
+build time, see `app/build.gradle.kts`); `env/GuestSetup.kt` lists it in
+`/etc/xbps.d/10-droidnative.conf`, before Void's repositories. xbps only
+installs from signed remote repositories and cannot ask whether to trust a
+new key without a terminal, so the app installs the trusted keys from
+`assets/xbps-keys/` (plus `DN_XBPS_KEY` for test builds) into
+`/var/db/xbps/keys`. The setup runs again when an app update ships a
+different setup script or repository URL; package updates come through
+the repository.
+
+**Flatpak store** ("Manage Flatpaks", `ui/FlatpakActivity.kt`,
+`apps/Flatpak.kt`): the user installation (`flatpak --user`). The catalogue
+is read straight from each remote's appstream data in the rootfs
+(`~/.local/share/flatpak/appstream/<remote>/<arch>/active`, names,
+summaries, descriptions, cached icons), so search needs no guest process;
+"Refresh catalogue" runs `flatpak update --appstream`. Installs, removals,
+updates, unused runtimes and remotes (`remote-add`, with `--from` for
+`.flatpakrepo` addresses; `remote-delete`) run one at a time in the
+background through the guest's flatpak, shown as a job card. Removing an
+app's data deletes `~/.var/app/<id>` directly: flatpak's `--delete-data`
+also needs the session bus, which only runs with the environment. On
+Adreno phones "Remove unused runtimes" also removes
+`org.freedesktop.Platform.GL.default`, since `FLATPAK_GL_DRIVERS` selects
+DroidNative's own extension.
+
+The store also opens Flatpak install links: the "Install" buttons of
+Flathub and other sites open `flatpak+https://.../<id>.flatpakref`, which
+FlatpakActivity handles (intent filter; downloaded `.flatpakref` files
+too). It fetches the file (https only, 64 KiB at most,
+`Flatpak.readRef`), shows the app's install sheet when a configured
+source serves it, else asks and runs `flatpak install --from`, which adds
+the source.
+
+**Presets** (`apps/Presets.kt`): the DroidNativePresets repository
+(github.com/DroidNative/DroidNativePresets) is kept unpacked in
+`files/presets`, refreshed through its tarball's ETag when software is
+installed (at most every 10 minutes). Per package (`<source>/<package>/`)
+`settings.ini` sets per-app settings, by desktop id, for apps the user has
+not configured, `layout.xml` files become button layouts, `helpers/` go to
+`/etc/DroidNative/helpers/<source>/<package>/`, and `preinstall.sh` /
+`postinstall.sh` run as the guest user with the preset folder at
+`/run/droidnative-preset` (`DN_PRESET_DIR`, `DN_HELPERS`, `DN_PACKAGE`;
+output in `files/logs/preset-<source>-<package>.log`). Where it applies:
+Flatpak installs from the store (package = app id, pre- and postinstall),
+AppImage installs (package = the AppImage's own desktop file name; every
+section maps to its `dn-appimage-<id>` entry; postinstall only) and xbps
+packages: installs from the native package screen run the requested
+packages' preinstall.sh; after every xbps job and at environment start
+(packages installed from a terminal) `xbps-query -l` is compared with the
+last list, and new packages get their preset (the first check covers
+everything installed). Presets applied at environment start are
+announced by notification. The source is a setting (Settings, Presets;
+`Prefs.presetSource`, default the DroidNativePresets repository): GitHub
+addresses become their codeload tarball (`Presets.tarballUrl`, branch
+main or /tree/<branch>), anything else is taken as a .tar.gz; a new
+source replaces the cache. "Apply to installed software" runs every
+installed package's preset again (settings still only for unconfigured
+apps).
+
+**Native packages** ("Manage Native (xbps) Packages",
+`ui/XbpsActivity.kt`, `apps/Xbps.kt`; replaced OctoXBPS): the catalogue is
+`xbps-query -Rs ""` (about 14000 packages, under a second), searched in
+the app by name or description; file search is `xbps-query -o '*text*'`
+over installed packages, as in OctoXBPS. Details come from `xbps-query
+[-R] <pkg>`, files from `-f`; an installed package's desktop entries give
+it an Open button. Installs, removals (optionally with dependencies
+nothing else needs, `-R`), orphan removal, cache cleaning, source sync
+(`xbps-install -S`) and the full update (`xbps-install -Syu`; when xbps
+demands its own update first, `xbps-install -Syu xbps` and a retry) run
+as the emulated root, one at a time. The job card shows a progress bar
+from the output (package count from "N packages will be installed",
+then the download, unpack and configure lines per package); "Show
+output" opens the complete output as a terminal view. Pending updates
+come from a dry run (`xbps-install -un`). Packages DroidNative needs
+(`Xbps.isProtected`) cannot be removed there.

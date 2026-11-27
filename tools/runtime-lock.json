@@ -1,0 +1,47 @@
+{
+  "certificates": {
+    "bundleSha256": "e9c7b63ee2623386e9b0a3ee32f499d01a8ea23dc83b8383ddff9f8e749543b7",
+    "debSha256": "c10585ac22c7f617a73d394eea29ba71d0356f350ae973b19043d1b017f80f54",
+    "url": "https://deb.debian.org/debian/pool/main/c/ca-certificates/ca-certificates_20250419+deb13u1_all.deb"
+  },
+  "nativeApk": {
+    "libraries": {
+      "arm64-v8a/libdroidnative.so": "20790837d96fc47c2456e1c7d142cc911dec4883c8e3cb678d8ed2b8a771eab4",
+      "arm64-v8a/libproot-loader.so": "7fd4082df7e17ee0bfe4bbd1cfed9c47e86bcee23ddb3769953ccbf967861582",
+      "arm64-v8a/libproot-loader32.so": "b10b465feda6d83c11fe0935e520fedf8e2c22c9881c4b4c2183added43c60d6",
+      "arm64-v8a/libproot.so": "87916ee44aea9f51a4a15a0cd588f19b8beebb2e8a3c62152698f5a7d56794e5",
+      "arm64-v8a/libvirgl-server.so": "9d668ebf80a7962a09779923c61a07f83444ad563bc0c6fd5be6a330374712a3",
+      "x86_64/libdroidnative.so": "d0a40c36df034b0cb24b9ffaaddf58c0cf4b749a0909dea7dbfacdcf0bc3fd3b",
+      "x86_64/libproot-loader.so": "ac36666dad9028cadaecc8a32e85f9dd6f6bbfac66e2273e44e4def6b4ccaaf7",
+      "x86_64/libproot-loader32.so": "0633730dd56658bf3d29f98872b8f370dcc145e3c891c9bb5639bf1ed2c07482",
+      "x86_64/libproot.so": "ed494d272d298ad7f5c44d739422a2c4d49d9cc46c41275fa55584034ee15977",
+      "x86_64/libvirgl-server.so": "13ee32ce47f460e83740ecf5df54562fca4491174a4fb3ff6909280718a062b3"
+    },
+    "sha256": "37586ce708176e9a950346a0834e6d29ba373ba81c3b369b35e8394b3c414d72",
+    "url": "https://github.com/DroidNative/DroidNativeApp/releases/download/beta-0.1/app-play-debug.apk"
+  },
+  "roots": [
+    {
+      "architecture": "amd64",
+      "bytes": 29842182,
+      "config": "sha256:cf7c9dcedc058a74762f2e1f01f6254e2376f3752452ddb347c1bb2a17618fd7",
+      "file": "debian13-amd64-rootfs.tar.gz",
+      "image_tag": "trixie-20261123-slim",
+      "index": "sha256:8aa5a7bf5a1955bddbe7d74fcdd0b91ab30e74362a8b73af672b0481b35b44a0",
+      "manifest": "sha256:ab3b3c8c5159eebfca4376430132d53c4d425f869c765ecbe47177a030da575d",
+      "sha256": "40748add9f4f6f944f334cbfc286590d6e93f60fb06f6ee7ffa1b894080ad861",
+      "xzSha256": "ed704ad1301e8ef8fcaa8db890fcf6117926fb84281538892be0fe9707e53eff"
+    },
+    {
+      "architecture": "arm64",
+      "bytes": 30198034,
+      "config": "sha256:486bbdb6417a70eba0898bf3a24a44648eb27938ac952f5bf7db09eca27ef7a6",
+      "file": "debian13-arm64-rootfs.tar.gz",
+      "image_tag": "trixie-20261123-slim",
+      "index": "sha256:8aa5a7bf5a1955bddbe7d74fcdd0b91ab30e74362a8b73af672b0481b35b44a0",
+      "manifest": "sha256:65d15c0ac2dd6639a130a05ffaf36b9d60697ef8d07125d79aecaaa9871bc97b",
+      "sha256": "48fb00926fe468d83ca04ee6775f36350d17e0f328dfcb03aadb5de0c52ae3f6",
+      "xzSha256": "9dfd5924a6f17ca09dadb41088136ce5bbd31d48da9210840f523a0f088cf68a"
+    }
+  ]
+}

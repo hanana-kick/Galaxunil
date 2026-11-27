@@ -1,0 +1,15 @@
+<resources>
+    <string name="curated_title">리눅스 앱 카탈로그</string>
+    <string name="curated_summary">리눅스 환경의 서명된 XBPS 저장소에서 데스크톱 앱을 설치합니다.</string>
+    <string name="curated_busy">패키지를 처리하고 있습니다.</string>
+    <string name="curated_query_error">설치된 패키지를 확인하지 못했습니다.</string>
+    <string name="curated_checking">설치된 앱 확인 중…</string>
+    <string name="curated_package">XBPS: %1$s</string>
+    <string name="curated_graphics">그래픽 설정: %1$s · 가속 미검증</string>
+    <string name="curated_open">열기</string>
+    <string name="curated_configure">앱 설정</string>
+    <string name="curated_install">설치</string>
+    <string name="curated_no_launcher">설치되어 있지만 실행 항목을 찾지 못했습니다.</string>
+    <string name="curated_refresh">설치 상태 새로고침</string>
+    <string name="curated_graphics_default">기본값 (앱별 설정 없음)</string>
+</resources>

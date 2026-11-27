@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+mode="$1"
+shift
+case "$mode" in
+  virgl) export GALLIUM_DRIVER=virpipe VTEST_SOCKET_NAME=/run/droidnative/virgl.sock ;;
+  llvmpipe) export GALLIUM_DRIVER=llvmpipe LIBGL_ALWAYS_SOFTWARE=1 ;;
+  *) echo "This Debian preview supports only VirGL and llvmpipe overrides." >&2; exit 2 ;;
+esac
+exec "$@"

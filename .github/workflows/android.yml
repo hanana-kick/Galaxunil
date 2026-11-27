@@ -1,0 +1,122 @@
+name: Android CI and Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v[0-9]*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install Android SDK packages
+        shell: bash
+        run: sdkmanager 'platforms;android-37' 'build-tools;37.0.0'
+      - name: Verify and prepare runtime assets
+        run: python3 tools/bootstrap_assets.py
+      - name: Test the AppStream parser
+        run: |
+          python3 -m venv .ci-venv
+          .ci-venv/bin/pip install 'PyYAML==6.0.2'
+          .ci-venv/bin/python -m unittest discover -s tests -p test_debian_catalog.py -v
+      - name: Android unit tests and preview APK
+        run: ./gradlew --no-daemon --console=plain :app:testPlayDebugUnitTest :app:assemblePlayDebug
+      - name: Stage Android preview artifact
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/play/debug/app-play-debug.apk dist/Galaxunil-preview.apk
+          "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify dist/Galaxunil-preview.apk
+          (cd dist && sha256sum Galaxunil-preview.apk > SHA256SUMS)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: galaxunil-preview
+          path: dist/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: android-test-results
+          path: app/build/test-results/
+          if-no-files-found: ignore
+
+  sign-release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Validate release ref
+        shell: bash
+        run: |
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - name: Build the Android release APK
+        shell: bash
+        run: |
+          sdkmanager 'platforms;android-37' 'build-tools;37.0.0'
+          python3 tools/bootstrap_assets.py
+          ./gradlew --no-daemon --console=plain \
+            "-PgalaxunilVersionName=${GITHUB_REF_NAME#v}" \
+            "-PgalaxunilVersionCode=$GITHUB_RUN_NUMBER" :app:assemblePlayRelease
+      - name: Sign and verify the APK
+        shell: bash
+        env:
+          GALAXUNIL_KEYSTORE_BASE64: ${{ secrets.GALAXUNIL_KEYSTORE_BASE64 }}
+          GALAXUNIL_KEY_ALIAS: ${{ secrets.GALAXUNIL_KEY_ALIAS }}
+          GALAXUNIL_STORE_PASSWORD: ${{ secrets.GALAXUNIL_STORE_PASSWORD }}
+          GALAXUNIL_KEY_PASSWORD: ${{ secrets.GALAXUNIL_KEY_PASSWORD }}
+        run: bash tools/sign_release.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: galaxunil-signed-release
+          path: dist-release/
+          if-no-files-found: error
+
+  publish-release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: sign-release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: galaxunil-signed-release
+          path: dist-release/
+      - name: Publish the verified GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          (cd dist-release && sha256sum -c SHA256SUMS)
+          options=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then options+=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" dist-release/Galaxunil.apk dist-release/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes "${options[@]}"

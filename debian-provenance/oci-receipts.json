@@ -1,0 +1,22 @@
+[
+  {
+    "architecture": "amd64",
+    "image_tag": "trixie-20261123-slim",
+    "index": "sha256:8aa5a7bf5a1955bddbe7d74fcdd0b91ab30e74362a8b73af672b0481b35b44a0",
+    "manifest": "sha256:ab3b3c8c5159eebfca4376430132d53c4d425f869c765ecbe47177a030da575d",
+    "config": "sha256:cf7c9dcedc058a74762f2e1f01f6254e2376f3752452ddb347c1bb2a17618fd7",
+    "sha256": "40748add9f4f6f944f334cbfc286590d6e93f60fb06f6ee7ffa1b894080ad861",
+    "bytes": 29842182,
+    "file": "debian13-amd64-rootfs.tar.gz"
+  },
+  {
+    "architecture": "arm64",
+    "image_tag": "trixie-20261123-slim",
+    "index": "sha256:8aa5a7bf5a1955bddbe7d74fcdd0b91ab30e74362a8b73af672b0481b35b44a0",
+    "manifest": "sha256:65d15c0ac2dd6639a130a05ffaf36b9d60697ef8d07125d79aecaaa9871bc97b",
+    "config": "sha256:486bbdb6417a70eba0898bf3a24a44648eb27938ac952f5bf7db09eca27ef7a6",
+    "sha256": "48fb00926fe468d83ca04ee6775f36350d17e0f328dfcb03aadb5de0c52ae3f6",
+    "bytes": 30198034,
+    "file": "debian13-arm64-rootfs.tar.gz"
+  }
+]

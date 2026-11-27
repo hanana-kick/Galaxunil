@@ -1,0 +1,14 @@
+Acquire::AllowInsecureRepositories "false";
+Acquire::AllowWeakRepositories "false";
+Acquire::AllowDowngradeToInsecureRepositories "false";
+Acquire::Check-Valid-Until "true";
+Acquire::https::Verify-Peer "true";
+Acquire::https::Verify-Host "true";
+Acquire::IndexTargets::deb::DEP-11 {
+    MetaKey "$(COMPONENT)/dep11/Components-$(NATIVE_ARCHITECTURE).yml";
+    ShortDescription "AppStream";
+    Description "$(RELEASE)/$(COMPONENT) $(NATIVE_ARCHITECTURE) AppStream";
+    KeepCompressed "false";
+    Optional "true";
+};
+Acquire::GzipIndexes "false";

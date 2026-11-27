@@ -36,11 +36,11 @@ jobs:
           printf 'ANDROID_HOME=%s\nANDROID_SDK_ROOT=%s\n' "$ANDROID_HOME" "$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
       - name: Verify and prepare runtime assets
         run: python3 tools/bootstrap_assets.py
-      - name: Test the AppStream parser
+      - name: Test catalog and device receipt checks
         run: |
           python3 -m venv .ci-venv
           .ci-venv/bin/pip install 'PyYAML==6.0.2'
-          .ci-venv/bin/python -m unittest discover -s tests -p test_debian_catalog.py -v
+          .ci-venv/bin/python -m unittest discover -s tests -p "test_*.py" -v
       - name: Android unit tests and preview APK
         run: ./gradlew --no-daemon --console=plain :app:testPlayDebugUnitTest :app:assemblePlayDebug
       - name: Stage Android preview artifact

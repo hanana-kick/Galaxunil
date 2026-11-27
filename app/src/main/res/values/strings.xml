@@ -442,4 +442,10 @@
     <string name="curated_no_launcher">Installed, but no matching desktop launcher was found.</string>
     <string name="curated_refresh">Refresh installed apps</string>
     <string name="curated_graphics_default">Default (no per-app override)</string>
+    <string name="diagnostic_section">Device diagnostics</string>
+    <string name="diagnostic_send">Send diagnostics</string>
+    <string name="diagnostic_preview_hint">Review exactly what will be copied. No raw logs, serial number or IP address are included. Sign in on the private page, paste the report and submit it there.</string>
+    <string name="diagnostic_copy_open">Copy and open page</string>
+    <string name="diagnostic_collect_failed">Could not prepare diagnostics.</string>
+    <string name="diagnostic_browser_missing">Diagnostics copied. Open the private intake page in a browser.</string>
 </resources>

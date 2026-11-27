@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="diagnostic_section">기기 진단</string>
+    <string name="diagnostic_send">진단 보내기</string>
+    <string name="diagnostic_preview_hint">복사할 내용을 확인하세요. 원본 로그, 일련번호, IP 주소는 포함되지 않습니다. 비공개 페이지에 로그인한 뒤 붙여넣고 보내세요.</string>
+    <string name="diagnostic_copy_open">복사하고 페이지 열기</string>
+    <string name="diagnostic_collect_failed">진단을 준비하지 못했습니다.</string>
+    <string name="diagnostic_browser_missing">진단을 복사했습니다. 브라우저에서 비공개 진단 페이지를 열어주세요.</string>
+</resources>

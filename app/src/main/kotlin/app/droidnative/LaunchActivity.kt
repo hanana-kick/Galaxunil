@@ -1,5 +1,7 @@
 package app.droidnative
 
+import app.droidnative.ui.DiagnosticAction
+
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -149,6 +151,7 @@ class LaunchActivity : ComponentActivity(), Compositor.Listener {
                                 .horizontalScroll(rememberScrollState()).padding(12.dp),
                             fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
                     }
+                    DiagnosticAction(appFailureTail = f.log)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton({ save.launch("${e.id.removeSuffix(".desktop")}-log.txt") }) {
                             Text(stringResource(R.string.launch_save_log))

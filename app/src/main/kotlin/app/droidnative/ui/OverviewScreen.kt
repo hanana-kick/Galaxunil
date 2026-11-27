@@ -125,6 +125,9 @@ fun OverviewScreen() {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 16.dp)) {
         item { StatusCard(status, context) }
         if (status.state == State.INSTALLING || status.state == State.ERROR) item { InstallLog() }
+        if (status.state == State.ERROR) item {
+            DiagnosticAction(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+        }
         val list = entries
         if (list != null) {
             item {

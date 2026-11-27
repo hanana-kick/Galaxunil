@@ -118,6 +118,9 @@ fun SettingsScreen() {
 
         HorizontalDivider(Modifier.padding(vertical = 8.dp))
         Hint(R.string.settings_restart_hint)
+        HorizontalDivider(Modifier.padding(vertical = 8.dp))
+        SectionTitle(R.string.diagnostic_section)
+        DiagnosticAction(Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
     }
 }
 

@@ -14,7 +14,7 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -49,7 +49,7 @@ fun <T> Choice(
     var open by remember { mutableStateOf(false) }
     ExposedDropdownMenuBox(open, { if (enabled) open = it }, modifier) {
         OutlinedTextField(text(value), {}, Modifier.fillMaxWidth()
-                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled),
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable, enabled),
             readOnly = true, enabled = enabled, singleLine = true,
             label = { Text(label) },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(open) })
@@ -82,7 +82,7 @@ fun <T> SearchChoice(
     fun close() { open = false; query = ""; focus.clearFocus() }
     ExposedDropdownMenuBox(open, { if (it) open = true else close() }, modifier) {
         OutlinedTextField(if (open) query else text(value), { query = it; open = true },
-            Modifier.fillMaxWidth().menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable),
+            Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryEditable),
             singleLine = true,
             label = { Text(label) },
             placeholder = { Text(stringResource(R.string.search_hint, text(value))) },

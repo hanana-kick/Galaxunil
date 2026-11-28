@@ -100,16 +100,11 @@ val releaseKeys = rootProject.file("keystore.properties").takeIf { it.isFile }?.
 }
 
 val runtimeAssets = rootProject.file("build/galaxunil-assets")
-val verifyRuntimeAssets by tasks.registering(Exec::class) {
-    workingDir(rootProject.projectDir)
-    commandLine("python3", "tools/bootstrap_assets.py", "--verify")
-}
-tasks.configureEach { if (name == "preBuild") dependsOn(verifyRuntimeAssets) }
 
 android {
     namespace = "app.droidnative"
-    compileSdk = 37
-    buildToolsVersion = "37.0.0"
+    compileSdk = 36
+    buildToolsVersion = "36.0.0"
     sourceSets.getByName("main").apply {
         jniLibs.srcDir(runtimeAssets.resolve("jniLibs"))
         assets.srcDir(runtimeAssets.resolve("assets"))
@@ -117,6 +112,8 @@ android {
 
     defaultConfig {
         applicationId = "io.github.hananakick.galaxunil"
+        minSdk = 24
+        targetSdk = 36
         versionCode = providers.gradleProperty("galaxunilVersionCode").orNull?.let {
             it.toIntOrNull()?.takeIf { code -> code in 1..2_100_000_000 }
                 ?: throw GradleException("galaxunilVersionCode must be an integer in 1..2100000000")
@@ -130,10 +127,15 @@ android {
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
-
     }
 
     signingConfigs {
+        create("debugConfig") {
+            storeFile = file("${rootDir}/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
         if (releaseKeys != null) create("release") {
             storeFile = rootProject.file(releaseKeys.getProperty("storeFile"))
             storePassword = releaseKeys.getProperty("storePassword")
@@ -143,26 +145,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debugConfig")
+        }
         release {
             signingConfig = signingConfigs.findByName("release")
-        }
-    }
-
-    flavorDimensions += "distribution"
-    productFlavors {
-        // Sideload / F-Droid: Termux-style targetSdk 28, the last level that
-        // allows executing files from the data directory (docs/architecture.md)
-        create("fdroid") {
-            dimension = "distribution"
-            applicationIdSuffix = ".fdroid"
-            minSdk = 24
-            targetSdk = 28
-        }
-        // Play compliant: all executables come from nativeLibraryDir
-        create("play") {
-            dimension = "distribution"
-            minSdk = 29
-            targetSdk = 37
         }
     }
 

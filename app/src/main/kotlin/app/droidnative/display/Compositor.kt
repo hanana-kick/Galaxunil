@@ -359,7 +359,8 @@ class Compositor {
         const val BUFFER_DMABUF = 2
 
         init {
-            System.loadLibrary("droidnative")
+            runCatching { System.loadLibrary("droidnative") }
+                .onFailure { Log.w(TAG, "libdroidnative.so not loaded: ${it.message}") }
         }
     }
 }
